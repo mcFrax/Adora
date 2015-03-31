@@ -1,0 +1,200 @@
+-- Pyf language
+
+entrypoints Module;
+
+Module_. Module ::= [Decl2] ;
+
+comment "#";
+
+
+-- -- --
+-- Lexer - tokens
+
+token LowerIdent (lower (letter | digit | '_')*) ;
+token UpperIdent (upper (letter | digit | '_')*) ;
+token DollarIdent ('$' (letter | digit | '_')*) ;
+token SpecialIdent ('_' '_' letter (letter | digit | '_')* '_' '_') ;
+
+-- -- --
+-- Utils
+
+MaybeComma_None. MaybeComma ::= ;
+MaybeComma_.     MaybeComma ::= "," ;
+
+-- -- --
+-- Type names
+
+separator TypeName "," ;
+
+_.                 TypeName ::= "(" TypeName ")" ;
+_.                 TypeName ::= TypeName1 ;
+TypeName_Unit.     TypeName ::= "(" ")" ;
+TypeName_Tuple.    TypeName ::= "(" TypeName "," [TypeName] ")" ;
+TypeName_Array.    TypeName ::= "[" TypeName "]" ;
+TypeName_Name.     TypeName ::= UpperIdent ;
+TypeName_Var.      TypeName ::= DollarIdent ;
+TypeName_Function_.  TypeName1 ::= "(" [TypeName] ")" "->" TypeName ;
+
+
+MaybeTypeName_None.  MaybeTypeName ::= ;
+MaybeTypeName_Some.  MaybeTypeName ::= TypeName ;
+
+-- -- --
+-- Declarations
+
+separator Decl "" ;
+separator Decl1 "" ;
+separator Decl2 "" ;
+
+_.  Decl ::= Decl1 ;
+
+_.  Decl1 ::= Decl2 ;
+_.  Decl1 ::= Decl3 ; -- MethodDeclaration
+_.  Decl1 ::= Decl4 ; -- MethodDefinition
+_.  Decl1 ::= Decl5 ; -- ImplementationDefinition
+-- _.  Decl1 ::= Decl6 -- ConstructorDefinition ;
+
+_.  Decl2 ::= Decl7 ; -- TypeDefinition
+TypeAliasDefinition.  Decl2 ::= UpperIdent "=" TypeName ;
+
+MethodDefinition.  Decl4 ::= Decl3 StatementBlock ;
+
+MethodDeclaration. Decl3 ::= "mth" LowerIdent "(" [FunDef_Arg] ")" OptResultType ;
+
+separator FunDef_Arg "," ;
+FunDef_Arg_Named. FunDef_Arg ::= TypeName LowerIdent MaybeDefaultVal ;
+FunDef_Arg_Unnamed. FunDef_Arg ::= TypeName ;
+
+MaybeDefaultVal_None. MaybeDefaultVal ::= ;
+MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
+
+OptResultType_None. OptResultType ::= ;
+OptResultType_Some. OptResultType ::= "->" TypeName;
+
+ImplementationDefinition. Decl5 ::= "implement" TypeName "{" [Decl1] "}" ;
+
+TypeDefinition_Variant.  Decl7 ::= "variant" UpperIdent "{" [VariantDefinition] [Decl1] "}" ;
+-- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "{" [Decl1] "}" ;
+
+separator VariantDefinition "" ;
+VariantDefinition_. VariantDefinition ::= UpperIdent "(" [TypeName] ")" ;
+
+
+-- -- --
+-- Statements
+
+-- Blocks
+
+StatementBlock_. StatementBlock ::= "{" [Stmt] "}" ;
+
+separator Stmt "" ;
+
+-- Statements
+
+Stmt_Decl.          Stmt ::= Decl2 ;
+Stmt_Expr.          Stmt ::= Expr ;
+Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
+Stmt_Return.        Stmt ::= "return" ;
+Stmt_ReturnValue.   Stmt ::= "return" Expr ;
+Stmt_PrintValue.    Stmt ::= "print" Expr ;
+Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
+Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
+-- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
+-- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
+-- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
+
+AssignOper_Assign. AssignOper ::= "=" ;
+-- AssignOper_Inc.    AssignOper ::= "+=" ;
+-- AssignOper_Dec.    AssignOper ::= "-=" ;
+-- AssignOper_Mul.    AssignOper ::= "*=" ;
+-- AssignOper_Pow.    AssignOper ::= "**=" ;
+-- AssignOper_Div.    AssignOper ::= "/=" ;
+-- AssignOper_IDiv.   AssignOper ::= "//=" ;
+-- AssignOper_Mod.    AssignOper ::= "%=" ;
+-- AssignOper_Xor.    AssignOper ::= "^=" ;
+-- AssignOper_BitAnd. AssignOper ::= "&=" ;
+-- AssignOper_BitOr.  AssignOper ::= "|=" ;
+-- AssignOper_BitNot. AssignOper ::= "~=" ;
+
+ElseClauses_None. ElseClauses ::= ;
+ElseClauses_Else. ElseClauses ::= "else"  StatementBlock ;
+ElseClauses_Elif. ElseClauses ::= "elif" Expr  StatementBlock ElseClauses ;
+
+-- -- --
+-- Expressions
+
+separator nonempty Expr "," ; -- for tuples
+_.              Expr ::= Expr2 ;
+Expr_If.        Expr ::= "if" Expr "then" Expr "else" Expr ;
+
+_.              Expr2 ::= Expr3 ;
+Expr_Or.        Expr2 ::= Expr2 "or" Expr3 ;
+
+_.              Expr3 ::= Expr4 ;
+Expr_And.       Expr3 ::= Expr3 "and" Expr4 ;
+
+_.              Expr4 ::= Expr5 ;
+Expr_Not.       Expr4 ::= "not" Expr4 ;
+Expr_In.        Expr4 ::= Expr5 "in" Expr5 ;
+Expr_NotIn.     Expr4 ::= Expr5 "not" "in" Expr5 ;
+
+_.              Expr5 ::= Expr6 ;
+Expr_RelOper.   Expr5 ::= Expr5 RelOper Expr6 ;
+
+RelOper_Eq.  RelOper ::= "==" ;
+RelOper_Neq. RelOper ::= "/=" ;
+RelOper_Lt.  RelOper ::= "<" ;
+RelOper_Lte. RelOper ::= "<=" ;
+RelOper_Gt.  RelOper ::= ">" ;
+RelOper_Gte. RelOper ::= ">=" ;
+
+_.              Expr6 ::= Expr7 ;
+Expr_Add.       Expr6 ::= Expr6 "+" Expr7 ;
+Expr_Sub.       Expr6 ::= Expr6 "-" Expr7 ;
+
+_.              Expr7 ::= Expr8 ;
+Expr_Mul.       Expr7 ::= Expr7 "*" Expr8 ;
+-- Expr_Div.       Expr7 ::= Expr7 "/" Expr8 ;
+-- Expr_IntDiv.    Expr7 ::= Expr7 "//" Expr8 ;
+-- Expr_Mod.       Expr7 ::= Expr7 "%" Expr8 ;
+
+_.              Expr8 ::= Expr9 ;
+Expr_Minus.     Expr8 ::= "-" Expr8 ;
+Expr_Plus.      Expr8 ::= "+" Expr8 ;
+
+_.              Expr9 ::= Expr10 ;
+Expr_Pow.       Expr9 ::= Expr10 "**" Expr9 ;
+
+separator nonempty UpperIdent "." ;
+
+_.              Expr10 ::= Expr11 ;
+Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
+Expr_Qualified. Expr10 ::= [UpperIdent] "." LowerIdent ;
+Expr_Attr.      Expr10 ::= Expr10 "." LowerIdent ;
+Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
+
+
+separator FunCallArg "," ;
+FunCallArg_Positional. FunCallArg ::= Expr ;
+FunCallArg_Keyword.    FunCallArg ::= LowerIdent "=" Expr ;
+
+_.              Expr11 ::= Expr12 ;
+Expr_Char.      Expr11 ::= Char ;
+Expr_String.    Expr11 ::= String ;
+-- Expr_Double.    Expr11 ::= Double ;
+Expr_Int.       Expr11 ::= Integer ;
+Expr_Tuple.     Expr11 ::= TupleVal ;
+Expr_Array.     Expr11 ::= BnfcSucksListVal ;
+Expr_Var.       Expr11 ::= LowerIdent ;
+Expr_New.       Expr11 ::= "new" TypeName ;
+
+TupleVal_0.     TupleVal ::= "(" ")" ;
+-- TupleVal_1 rule is necessary to enforce comma while not allowing double comma
+TupleVal_1.     TupleVal ::= "(" Expr "," ")" ;
+TupleVal_More.  TupleVal ::= "(" Expr "," [Expr] MaybeComma ")" ;
+
+-- Using just `ListVal` doesn't work, because bnfc sucks (some kind of bug)
+BnfcSucksListVal_0.      BnfcSucksListVal ::= "[" "]" ;
+BnfcSucksListVal_More.   BnfcSucksListVal ::= "[" [Expr] MaybeComma "]" ;
+
+_.              Expr12 ::= "(" Expr ")" ;
