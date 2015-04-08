@@ -35,7 +35,7 @@ data Value = ValVoid
 
 type AttrDict = M.Map VarName Location
 
-data VarType = RefVar ClassNameDesc
+data VarType = RefVar ClassDesc
              | ValVar StructName
 
 data ClassDesc = ClassDesc {

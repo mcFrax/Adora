@@ -10,10 +10,10 @@ comment "#";
 -- -- --
 -- Lexer - tokens
 
-token LowerIdent (lower (letter | digit | '_')*) ;
-token UpperIdent (upper (letter | digit | '_')*) ;
-token DollarIdent ('$' (letter | digit | '_')*) ;
-token SpecialIdent ('_' '_' letter (letter | digit | '_')* '_' '_') ;
+position token LowerIdent (lower (letter | digit | '_')*) ;
+position token UpperIdent (upper (letter | digit | '_')*) ;
+position token DollarIdent ('$' (letter | digit | '_')*) ;
+-- position token SpecialIdent ('_' '_' letter (letter | digit | '_')* '_' '_') ;
 
 -- -- --
 -- Utils
@@ -24,29 +24,30 @@ MaybeComma_.     MaybeComma ::= "," ;
 -- -- --
 -- Type names
 
-separator TypeName "," ;
+separator TypeExpr "," ;
 
-_.                 TypeName ::= "(" TypeName ")" ;
-_.                 TypeName ::= TypeName1 ;
-TypeName_Unit.     TypeName ::= "(" ")" ;
-TypeName_Tuple.    TypeName ::= "(" TypeName "," [TypeName] ")" ;
-TypeName_Array.    TypeName ::= "[" TypeName "]" ;
-TypeName_Name.     TypeName ::= UpperIdent ;
-TypeName_Var.      TypeName ::= DollarIdent ;
-TypeName_Function.  TypeName1 ::= "(" [TypeName] ")" "->" TypeName ;
+_. TypeExpr ::= TypeExpr0 ;  -- not function notation
+_. TypeExpr ::= TypeExpr1 ;  -- function notation
 
+_. TypeExpr0 ::= "(" TypeExpr ")" ;
+_. TypeExpr0 ::= TypeExpr2 ;  -- primitive types
+_. TypeExpr0 ::= TypeExpr3 ;  -- type variables
+_. TypeExpr0 ::= TypeExpr4 ;  -- complex types
 
-MaybeTypeName_None.  MaybeTypeName ::= ;
-MaybeTypeName_Some.  MaybeTypeName ::= TypeName ;
+TypeExpr_Name.  TypeExpr2 ::= UpperIdent ;
+
+TypeExpr_Var.  TypeExpr3 ::= DollarIdent ;
+
+TypeExpr_Qualified.  TypeExpr4 ::= TypeExpr0 "." UpperIdent ;
+TypeExpr_Insta.      TypeExpr4 ::= TypeExpr0 "<!" TypeExpr "!>" ;
+
+TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
+
 
 -- -- --
 -- Declarations
 
-separator Decl "" ;
 separator Decl1 "" ;
-separator Decl2 "" ;
-
-_.  Decl ::= Decl1 ;
 
 _.  Decl1 ::= Decl2 ;
 _.  Decl1 ::= Decl3 ; -- MethodDeclaration
@@ -55,7 +56,7 @@ _.  Decl1 ::= Decl5 ; -- ImplementationDefinition
 -- _.  Decl1 ::= Decl6 -- ConstructorDefinition ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
-TypeAliasDefinition.  Decl2 ::= UpperIdent "=" TypeName ;
+TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" TypeExpr ;
 
 MethodDefinition.  Decl4 ::= Decl3 StatementBlock ;
 
@@ -64,22 +65,24 @@ MethodDeclaration. Decl3 ::= "mth" LowerIdent FnSignature ;
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
-FunDef_Arg_Named. FunDef_Arg ::= TypeName LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= TypeName ;
+FunDef_Arg_Named. FunDef_Arg ::= TypeExpr LowerIdent MaybeDefaultVal ;
+FunDef_Arg_Unnamed. FunDef_Arg ::= TypeExpr ;
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 
 OptResultType_None. OptResultType ::= ;
-OptResultType_Some. OptResultType ::= "->" TypeName;
+OptResultType_Some. OptResultType ::= "->" TypeExpr;
 
-ImplementationDefinition. Decl5 ::= "implement" TypeName "{" [Decl1] "}" ;
+ImplementationDefinition. Decl5 ::= "implement" TypeExpr "{" [Decl1] "}" ;
 
-TypeDefinition_Variant.  Decl7 ::= "variant" UpperIdent "{" [VariantDefinition] [Decl1] "}" ;
--- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "{" [Decl1] "}" ;
+separator DollarIdent "," ;
+
+TypeDefinition_Class.  Decl7 ::= "class" UpperIdent "<!" [DollarIdent] "!>" "{" [VariantDefinition] [Decl1] "}" ;
+-- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "<!" [DollarIdent] "!>" "{" [Decl1] "}" ;
 
 separator VariantDefinition "" ;
-VariantDefinition_. VariantDefinition ::= UpperIdent "(" [TypeName] ")" ;
+VariantDefinition_. VariantDefinition ::= UpperIdent "(" [TypeExpr] ")" ;
 
 
 -- -- --
@@ -172,11 +175,8 @@ Expr_Plus.      Expr8 ::= "+" Expr8 ;
 _.              Expr9 ::= Expr10 ;
 Expr_Pow.       Expr9 ::= Expr10 "**" Expr9 ;
 
-separator nonempty UpperIdent "." ;
-
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
-Expr_Qualified. Expr10 ::= [UpperIdent] "." LowerIdent ;
 Expr_Attr.      Expr10 ::= Expr10 "." LowerIdent ;
 Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
 
@@ -193,7 +193,7 @@ Expr_Int.       Expr11 ::= Integer ;
 Expr_Tuple.     Expr11 ::= TupleVal ;
 Expr_Array.     Expr11 ::= BnfcSucksListVal ;
 Expr_Var.       Expr11 ::= LowerIdent ;
-Expr_New.       Expr11 ::= "new" TypeName ;
+Expr_Type.      Expr11 ::= TypeExpr ;
 
 TupleVal_0.     TupleVal ::= "(" ")" ;
 -- TupleVal_1 rule is necessary to enforce comma while not allowing double comma
