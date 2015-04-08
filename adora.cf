@@ -39,7 +39,7 @@ TypeExpr_Name.  TypeExpr2 ::= UpperIdent ;
 TypeExpr_Var.  TypeExpr3 ::= DollarIdent ;
 
 TypeExpr_Qualified.  TypeExpr4 ::= TypeExpr0 "." UpperIdent ;
-TypeExpr_Insta.      TypeExpr4 ::= TypeExpr0 "<!" TypeExpr "!>" ;
+TypeExpr_Insta.      TypeExpr4 ::= TypeExpr0 "<!" [TypeExpr] "!>" ;
 
 TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
 
@@ -47,13 +47,23 @@ TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
 -- -- --
 -- Declarations
 
-separator Decl1 "" ;
+separator Decl10 "" ;
+separator Decl11 "" ;
 
-_.  Decl1 ::= Decl2 ;
-_.  Decl1 ::= Decl3 ; -- MethodDeclaration
-_.  Decl1 ::= Decl4 ; -- MethodDefinition
-_.  Decl1 ::= Decl5 ; -- ImplementationDefinition
--- _.  Decl1 ::= Decl6 -- ConstructorDefinition ;
+_.  Decl ::= Decl0 ;  -- declarations available only in class/struct definition
+-- _.  Decl ::= Decl1 ;  -- declarations available only outside class/struct definition
+_.  Decl ::= Decl2 ;  -- declarations available everywhere
+
+_. Decl10 ::= Decl0 ;  -- declarations available in class/struct definition
+_. Decl10 ::= Decl2 ;  -- declarations available in class/struct definition
+
+-- _. Decl11 ::= Decl1 ;  -- declarations available in outside class/struct definition
+_. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definition
+
+_.  Decl0 ::= Decl3 ; -- MethodDeclaration
+_.  Decl0 ::= Decl4 ; -- MethodDefinition
+_.  Decl0 ::= Decl5 ; -- ImplementationDefinition
+-- _.  Decl0 ::= Decl6 -- ConstructorDefinition ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
 TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" TypeExpr ;
@@ -74,12 +84,12 @@ MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" TypeExpr;
 
-ImplementationDefinition. Decl5 ::= "implement" TypeExpr "{" [Decl1] "}" ;
+ImplementationDefinition. Decl5 ::= "implement" TypeExpr "{" [Decl10] "}" ;
 
 separator DollarIdent "," ;
 
-TypeDefinition_Class.  Decl7 ::= "class" UpperIdent "<!" [DollarIdent] "!>" "{" [VariantDefinition] [Decl1] "}" ;
--- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "<!" [DollarIdent] "!>" "{" [Decl1] "}" ;
+TypeDefinition_Class.  Decl7 ::= "class" UpperIdent "<!" [DollarIdent] "!>" "{" [VariantDefinition] [Decl10] "}" ;
+-- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "<!" [DollarIdent] "!>" "{" [Decl10] "}" ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent "(" [TypeExpr] ")" ;
@@ -96,7 +106,7 @@ separator Stmt "" ;
 
 -- Statements
 
-Stmt_Decl.          Stmt ::= Decl2 ;
+Stmt_Decl.          Stmt ::= Decl11 ;
 Stmt_Expr.          Stmt ::= Expr ;
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
 Stmt_Return.        Stmt ::= "return" ;
