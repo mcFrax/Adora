@@ -1,0 +1,109 @@
+Ciekawe, gdzie wsadziłem notatki papierowe. Chyba byłoby mądrze, gdybym miał je ze sobą :P
+
+Ok, co jest ważne:
+
+newtype VarName = String
+newtype Location = Int
+
+type Env = M.Map VarName Location
+type Store = M.Map Location Value
+
+type AttrDict = M.Map VarName ALocation
+
+data Value = AVInt { valToInt :: Int }
+            | AVChar { valToChar :: Int }
+            | AVObject { valObjAttrs :: AttrDict }
+
+
+data StructDesc = StructDesc {
+    structName :: String,
+    structAttrs :: M.Map String TypeId,
+    structMethods :: M.Map String FunDesc,
+    structClasses :: M.Map TypeId Implementation
+}
+
+data ClassDesc = ClassDesc {
+    className :: String,
+    classAttrs :: M.Map String TypeId,
+    classMethods :: M.Map String FunDesc
+}
+
+type Implementation = M.Map String FunDef
+
+TypeId = ClassDesc
+
+typeType = StructDesc{
+    structName="Type",
+    structAttrs=M.fromList [("attrs", typeListOf $ typeTupleOf [typeString, typeType])],
+    structMethods=M.fromList [("attrs", typeListOf typeType)],
+    structClasses=M.fromList []
+}
+
+typeType = StructDesc
+
+
+- class
+    + property specification
+        - gettable
+        - settable
+    + method specification
+        - returnType
+        - arguments
+            + name
+            + type
+            + default value
+        - const?
+
+- struct (record)
+    + attribute (field)
+    + property implementation
+        - getter
+        - setter
+        - attribute (field)
+    + method implementation
+        - method specification
+        - body
+    + implementation
+        - property implementations
+        - methods
+
+- operations
+    + property getter/setter use
+        ```
+        foo.prop
+        foo.prop = value
+        ```
+    + direct attribute
+        ```
+        foo:attr
+        foo:attr := value
+        ```
+
+- variable/argument/attribute types
+    + reference
+    + nullable reference
+    + actual struct/record
+
+rvalues/lvalues?
+nullable/non-nullable types?
+
+    class variant Foo {
+        # class with one record type
+    }
+
+    class Foo {
+        # specification here
+        variant Foo {
+            # implementation here
+        }
+    }
+
+    class Foo {
+        prop foo {
+            get set Bar
+        }
+        prop {
+            get Bar
+        }
+        mth ???
+    }

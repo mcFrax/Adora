@@ -2,7 +2,7 @@
 
 entrypoints Module;
 
-Module_. Module ::= [Decl2] ;
+Module_. Module ::= [Stmt] ;
 
 comment "#";
 
@@ -33,7 +33,7 @@ TypeName_Tuple.    TypeName ::= "(" TypeName "," [TypeName] ")" ;
 TypeName_Array.    TypeName ::= "[" TypeName "]" ;
 TypeName_Name.     TypeName ::= UpperIdent ;
 TypeName_Var.      TypeName ::= DollarIdent ;
-TypeName_Function_.  TypeName1 ::= "(" [TypeName] ")" "->" TypeName ;
+TypeName_Function.  TypeName1 ::= "(" [TypeName] ")" "->" TypeName ;
 
 
 MaybeTypeName_None.  MaybeTypeName ::= ;
@@ -59,7 +59,9 @@ TypeAliasDefinition.  Decl2 ::= UpperIdent "=" TypeName ;
 
 MethodDefinition.  Decl4 ::= Decl3 StatementBlock ;
 
-MethodDeclaration. Decl3 ::= "mth" LowerIdent "(" [FunDef_Arg] ")" OptResultType ;
+MethodDeclaration. Decl3 ::= "mth" LowerIdent FnSignature ;
+
+FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
 FunDef_Arg_Named. FunDef_Arg ::= TypeName LowerIdent MaybeDefaultVal ;
@@ -124,8 +126,13 @@ ElseClauses_Elif. ElseClauses ::= "elif" Expr  StatementBlock ElseClauses ;
 -- Expressions
 
 separator nonempty Expr "," ; -- for tuples
-_.              Expr ::= Expr2 ;
-Expr_If.        Expr ::= "if" Expr "then" Expr "else" Expr ;
+_.              Expr ::= Expr0 ;
+
+_.              Expr0 ::= Expr1 ;
+Expr_Lambda.    Expr0 ::= "fn" FnSignature StatementBlock ;
+
+_.              Expr1 ::= Expr2 ;
+Expr_If.        Expr1 ::= "if" Expr "then" Expr "else" Expr ;
 
 _.              Expr2 ::= Expr3 ;
 Expr_Or.        Expr2 ::= Expr2 "or" Expr3 ;
