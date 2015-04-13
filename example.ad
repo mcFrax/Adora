@@ -1,0 +1,49 @@
+let a = 1  # komentarz po `#`
+assert a == 1
+# a = 2  # błąd - a jest stałą
+putLine(a.toString)
+var b = 1
+b == 2
+
+class Tree <! $a !> () {
+    # $a jest parametrem typu; z notacji typów generycznych - tych <! !> - nie
+    # jestem zadowolony, ale brakowało mi kolejnych nawiasów
+
+    # W klasie można zdeklarować podklasy, wraz z implementującymi ją strukturami,
+    # co nazywam wariantami. Ma to dać możliwość notacji podobnej do typów
+    # wariantowych z języków funkcyjnych.
+
+    Empty {
+        mth fold<!$b!>(($b, $b, $a)->$b func, $b initval)->$b {
+            initval  # `return` is optional
+        }
+    }
+    Node {
+        $a value
+        Tree<!$a!> left
+        Tree<!$a!> right
+        pro value {
+            get set auto  # udostepnienie atrybutu
+        }
+        pro left {
+            get set auto
+        }
+        pro right {
+            get set auto
+        }
+
+        mth fold<!$b!>(($b, $b, $a)->$b func, $b initval)->$b {
+            let l = self.left.fold(func, initval)
+            let r = self.right.fold(func, initval)
+            return func(l, r, self.[value])  # jako value jest uzyty bezposrednio atrybut, a nie property
+        }
+    }
+    # metoda `fold` jest zdefiniowana we wszystkich wariantach, więc jest automatycznie
+    # zdefiniowana również dla Tree<!$a!>
+}
+
+let t1 = Tree<!Int!>.Empty()
+let t2 = Tree<!Int!>.Node(t1, t1, 1)
+let t3 = Tree<!Int!>.Node(t1, t2, 2)
+
+t3.fold<!Int!>(fn(Int a, Int b, Int c)->Int { a+b+c }, 0)

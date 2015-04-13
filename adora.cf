@@ -73,11 +73,17 @@ FieldDefinition.            Decl0 ::= TypeExpr LowerIdent MaybeDefaultVal ;
 PropertyDeclaration.        Decl0 ::= "pro" LowerIdent "{" [PropDeclClause] "}" ;
 
 separator PropDeclClause "" ;
-PropDeclClause_Decl.   PropDeclClause ::= [PropAttrName] TypeExpr ;
-PropDefClause_Def.     PropDeclClause ::= PropAttrName TypeExpr StatementBlock ;
-PropDefClause_AutoDef. PropDeclClause ::= PropAttrName TypeExpr "auto" ;  -- default implementation using underlying field of the same name
+PropDeclClause_.   PropDeclClause ::= PropAttrName PropDeclClause1 ;
 
-separator nonempty PropAttrName "," ;
+_.                       PropDeclClause1 ::= PropDeclClause2 ;
+PropDeclClause_SecAttr.  PropDeclClause1 ::= PropAttrName PropDeclClause2 ;
+
+PropDeclClause_Def.      PropDeclClause2 ::= TypeExpr MaybePropAttrDef ;
+PropDeclClause_Auto.     PropDeclClause2 ::= "auto" ;
+
+MaybePropAttrDef_None.   MaybePropAttrDef ::= ;
+MaybePropAttrDef_Some.   MaybePropAttrDef ::= StatementBlock ;
+
 PropAttrName_Get.  PropAttrName ::= "get" ;
 PropAttrName_Set.  PropAttrName ::= "set" ;
 
@@ -108,13 +114,13 @@ MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
 MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= "<!" [TypeParamDef] "!>" ;
 
 separator TypeParamDef "," ;
-TypeParamDef_.  TypeParamDef ::= MaybeSubclasses DollarIdent MaybeSuperclasses ;
-
-MaybeSubclasses_None. MaybeSubclasses ::= ;
-MaybeSubclasses_Some. MaybeSubclasses ::= [TypeExpr] "<" ;
+TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
 
 MaybeSuperclasses_None. MaybeSuperclasses ::= ;
 MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" [TypeExpr] ;
+
+MaybeSubclasses_None. MaybeSubclasses ::= ;
+MaybeSubclasses_Some. MaybeSubclasses ::= ">" [TypeExpr] ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent "{" [Decl10] "}" ;
