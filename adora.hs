@@ -1,16 +1,20 @@
 module Adora where
 
+import Control.Monad.Error
+import qualified Data.Map as M
+import System.Exit(exitFailure)
+
 import Absadora
 
 type VarName = String
 type ClassName = String
 type StructName = String
-type Location = Loc {
+data Location = Loc {
     locDepth :: Int,  -- closure depth, 0 == current
     locVal :: Int
 }
 
-type Closure = Closure {
+data Closure = Closure {
     cloSuper :: Maybe Closure,
     cloValues :: M.Map Int Value
 }
@@ -44,7 +48,7 @@ data ClassDesc = ClassDesc {
 }
 
 data PropDesc = PropDesc {
-    propGetType :: Maybe VarType
+    propGetType :: Maybe VarType,
     propSetType :: Maybe VarType
 }
 
@@ -102,6 +106,11 @@ globalEnv = Env {
     }
 
 moduleSem :: Module -> SemanticErrorOr IO ()
+moduleSem (Module_ stmts) = do
+    k <- stmtBlockSem (StatementBlock_ stmts) globalEnv
+    return $ k globalEnv (return ()) $ Closure Nothing M.empty
+
+
 stmtBlockSem :: StatementBlock -> Env -> SemanticErrorOr (Cont -> Cont)
 stmtSem :: Stmt -> Env -> SemanticErrorOr (Cont -> Cont)
 exprSem :: Expr -> Env -> SemanticErrorOr (ContE -> Cont)
@@ -117,3 +126,10 @@ instance Error SemanticError where
 showSemError :: SemanticError -> String
 showSemError (SemanticError s) = "SemanticError: " ++ s
 
+main :: IO ()
+main = return ()
+--     case stmtBlockSem (StatementBlock stmts) globalEnv of
+--         Left err -> do
+--             hPutStrLn stderr $ showSemError err
+--             exitFailure
+--         Right k ->

@@ -1,109 +1,118 @@
-Ciekawe, gdzie wsadziłem notatki papierowe. Chyba byłoby mądrze, gdybym miał je ze sobą :P
+Język Adora
+===
 
-Ok, co jest ważne:
+Opis ogólny
+---
 
-newtype VarName = String
-newtype Location = Int
+Obiektowy język programowania, imperatywny, statycznie typowany, refleksyjny, z rozbudowanym systemem typów i częściowym wsparciem dla funkcyjnego stylu programowania.
 
-type Env = M.Map VarName Location
-type Store = M.Map Location Value
+Język jest opracywany przeze mnie na potrzeby tego zadania, i z pewnością w wielu miejscach niedopracowany. Niewykluczone, że jakieś elementy składni będę musiał dodać bądź zmienić w trakcie implementacji, żeby ostatecznie wyszło z tego coś sensownego.
+Zależało mi na tym, żeby wcisnąć tu parę
 
-type AttrDict = M.Map VarName ALocation
+###System typów
 
-data Value = AVInt { valToInt :: Int }
-            | AVChar { valToChar :: Int }
-            | AVObject { valObjAttrs :: AttrDict }
+Ważnym elementem języka ma być system typów, częściowo oddzielający dziedziczenie implementacji od dziedziczenia interfejsu. Mają się na niego składać klasy, podobne do haskellowych, oraz struktury, porządkujące dane i implementujące ich interfejs (określany przez klasy). Klasy i struktury mogą być parametryzowane innymi typami (coś w rodzaju typów generycznych z Javy).
 
+Dostęp do pól (atrybutów) struktur jest chroniony, publicznie dostępne są natomiast własności (properties), mające zdefiniowane gettery i settery (być może tylko jeden z nich), i używane tak jak zwykle atrybuty (wywołanie metody jest niejawne).
 
-data StructDesc = StructDesc {
-    structName :: String,
-    structAttrs :: M.Map String TypeId,
-    structMethods :: M.Map String FunDesc,
-    structClasses :: M.Map TypeId Implementation
-}
+Funkcje mają być obiektami pierwszej klasy. Metody jako takie nie, ale metody związane z obiektem mają się dać używać jako funkcje.
 
-data ClassDesc = ClassDesc {
-    className :: String,
-    classAttrs :: M.Map String TypeId,
-    classMethods :: M.Map String FunDesc
-}
+Znacznie obszerniejszy opis systemu klas postaram się dostarczyć z gotowym interpreterem - niektóre szczegóły wymagają jeszcze przemyślenia. Między innymi, nie jestem pewien, jak rozwiązać problem przestrzeni nazw klas i struktur - jednocześnie chciałbym, żeby mogły być wspólne, i jest to znaczącą przeszkodą (gryzie się co najmniej z refleksją, bo sama nazwa nie określa wystarczająco typu).
 
-type Implementation = M.Map String FunDef
+###Biblioteka standardowa i typy wbudowane
 
-TypeId = ClassDesc
+Niestety, nie zdążyłem jeszcze porządnie przemyśleć biblioteki standardowej i typów wbudowanych, więc mogę podać tylko ogólną listę przewidzianych składników:
 
-typeType = StructDesc{
-    structName="Type",
-    structAttrs=M.fromList [("attrs", typeListOf $ typeTupleOf [typeString, typeType])],
-    structMethods=M.fromList [("attrs", typeListOf typeType)],
-    structClasses=M.fromList []
-}
+- standardowe typy takie jak `Bool`, `Int`, `Char`, `Double`, `String`
+- kontenery: listy, tablice, krotki
+- zestaw podstawowych klas, takich jak (być może inaczej nazwane):
 
-typeType = StructDesc
+    + `Object`, bazowa klasa dziedziczona _implicite_ przez wszystkie inne
+    + `Show`, `Eq` i `Ord` z Haskella,
+    + `Bool`,
+    + `Index` (udostępniające składnię indeksu),
+    + `Function` udostępniające składnię wywołania funkcji,
+    + `Copy`
+    + `Type` (refleksja)
 
+- obiekt typu `Type`jest konstruktorems
+- wejście/wyjście (co najmniej jakieś podstawowe funkcje do obsługi stdin/stdout)
 
-- class
-    + property specification
-        - gettable
-        - settable
-    + method specification
-        - returnType
-        - arguments
-            + name
-            + type
-            + default value
-        - const?
+###Inne szczegóły
 
-- struct (record)
-    + attribute (field)
-    + property implementation
-        - getter
-        - setter
-        - attribute (field)
-    + method implementation
-        - method specification
-        - body
-    + implementation
-        - property implementations
-        - methods
+- niejawne argumenty:
 
-- operations
-    + property getter/setter use
-        ```
-        foo.prop
-        foo.prop = value
-        ```
-    + direct attribute
-        ```
-        foo:attr
-        foo:attr := value
-        ```
+    + `self` w metodach (w tym setterach i getterach) jest obiektem, na którym metoda została wywołana
+    + `value` w setterze jest przypisywaną wartością
 
-- variable/argument/attribute types
-    + reference
-    + nullable reference
-    + actual struct/record
+- domknięcia
 
-rvalues/lvalues?
-nullable/non-nullable types?
+- instrukcja `return` powinna być pomijalna, jeżeli ostatnie wyrażenie w bloku ma odpowiedni typ
 
-    class variant Foo {
-        # class with one record type
-    }
+- w języku brakuje wyjątków; chciałbym je dodać, jeżeli starczy mi na to czasu, ale prawdopodobnie tak się nie stanie. Dlatego nie umieszczam ich na razie w składni, nie chcąc przeciążać jej nadmiarowymi i nieprzemyślanymi strukturami.
 
-    class Foo {
-        # specification here
-        variant Foo {
-            # implementation here
+###Nazwa
+
+Nazwa języka pochodzi od imienia jednej z bohaterek Terrego Pratchetta, Adory Dearheart. Została wybrana ze względu na ładne brzmienie, i nie ma w niej żadnego ukrytego sensu.
+
+Przykładowy kod
+---
+
+Kod jest bardzo krótki, bo niestety pisałem go w ostatniej chwili. Postaram się dosłać pełniejszy przykład w późniejszym terminie.
+
+```
+let a = 1  # komentarz po `#`
+assert a == 1
+# a = 2  # błąd - a jest stałą
+putLine(a.toString)
+var b = 1
+b == 2
+
+class Tree<!$a!>() {
+    # $a jest parametrem typu; z notacji typów generycznych - tych <! !> - nie
+    # jestem zadowolony, ale brakowało mi kolejnych nawiasów
+
+    # W klasie można zdeklarować podklasy, wraz z implementującymi ją strukturami,
+    # co nazywam wariantami. Ma to dać możliwość notacji podobnej do typów
+    # wariantowych z języków funkcyjnych.
+
+    Empty {
+        mth fold<!$b!>(($b, $b, $a)->$b func, $b initval)->$b {
+            initval  # `return` is optional
         }
     }
+    Node {
+        $a value
+        Tree<!$a!> left
+        Tree<!$a!> right
+        prop value {
+            get set auto  # udostepnienie atrybutu
+        }
+        prop left {
+            get set auto
+        }
+        prop right {
+            get set auto
+        }
 
-    class Foo {
-        prop foo {
-            get set Bar
+        mth fold<!$b!>(($b, $b, $a)->$b func, $b initval)->$b {
+            let l = self.left.fold(func, initval)
+            let r = self.right.fold(func, initval)
+            return func(l, r, self.[value])  -- jako value jest uzyty bezposrednio atrybut, a nie property
         }
-        prop {
-            get Bar
-        }
-        mth ???
     }
+    # metoda `fold` jest zdefiniowana we wszystkich wariantach, więc jest automatycznie
+    # zdefiniowana również dla Tree<!$a!>
+}
+
+let t1 = Tree<!Int!>.Empty()
+let t2 = Tree<!Int!>.Node(t1, t1, 1)
+let t3 = Tree<!Int!>.Node(t1, t2, 2)
+
+t3.fold<!Int!>(fn(Int a, Int b, Int c)->Int { a+b+c }, 0)
+```
+
+Składnia
+---
+
+Opis składni umieściłem w pliku `adora.cf`. Jest to poprawny, kompilujący się kod dla bnfc. Składnia celowo nie zawiera średników ani innych separatorów pomiędzy instrukcjami i deklaracjami. Chętnie wpisałbym końce linii do składni, i użył wcięć zamiast wąsatych nawiasów, jest to jednak duża komplikacja - z tego co wiem, parser wygenerowany przez bnfc nie potrafi tego obsłużyć. Być może jednak nie sprawdziłem wystarczająco możliwości jego "layout syntax" - jeżeli tak jest, prawdopodobnie zmienię składnię w odpowiedni sposób, dodając jakiś znaczek przed blokami, i średniki między instrukcjami i deklaracjami. Na pewno nie da to dokładnie tego, co bym chciał, ale być może będzie blisko.

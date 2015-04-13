@@ -10,6 +10,7 @@ comment "#";
 -- -- --
 -- Lexer - tokens
 
+separator LowerIdent "," ;
 position token LowerIdent (lower (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' (letter | digit | '_')*) ;
@@ -47,6 +48,11 @@ TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
 -- -- --
 -- Declarations
 
+-- Rozbicie rodzajow deklaracji jest nieco drobniejsze, niz bylo to koniecznie
+-- potrzebne, dzieki temu jest jednak w miare spojne. Zalezalo mi na tym,
+-- zeby wszystkie deklaracje mialy ten sam typ w haskellowej implementacji,
+-- a jednoczesnie potrzebowalem niektore rodzaje deklaracji oddzielic.
+
 separator Decl10 "" ;
 separator Decl11 "" ;
 
@@ -60,17 +66,25 @@ _. Decl10 ::= Decl2 ;  -- declarations available in class/struct definition
 -- _. Decl11 ::= Decl1 ;  -- declarations available in outside class/struct definition
 _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definition
 
-_.  Decl0 ::= Decl3 ; -- MethodDeclaration
-_.  Decl0 ::= Decl4 ; -- MethodDefinition
-_.  Decl0 ::= Decl5 ; -- ImplementationDefinition
--- _.  Decl0 ::= Decl6 -- ConstructorDefinition ;
+_.                          Decl0 ::= Decl3 ; -- MethodDeclaration
+MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
+ImplementationDefinition.   Decl0 ::= "implement" TypeExpr "{" [Decl10] "}" ;
+FieldDefinition.            Decl0 ::= TypeExpr LowerIdent MaybeDefaultVal ;
+PropertyDeclaration.        Decl0 ::= "pro" LowerIdent "{" [PropDeclClause] "}" ;
+
+separator PropDeclClause "" ;
+PropDeclClause_Decl.   PropDeclClause ::= [PropAttrName] TypeExpr ;
+PropDefClause_Def.     PropDeclClause ::= PropAttrName TypeExpr StatementBlock ;
+PropDefClause_AutoDef. PropDeclClause ::= PropAttrName TypeExpr "auto" ;  -- default implementation using underlying field of the same name
+
+separator nonempty PropAttrName "," ;
+PropAttrName_Get.  PropAttrName ::= "get" ;
+PropAttrName_Set.  PropAttrName ::= "set" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
 TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" TypeExpr ;
 
-MethodDefinition.  Decl4 ::= Decl3 StatementBlock ;
-
-MethodDeclaration. Decl3 ::= "mth" LowerIdent FnSignature ;
+MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
@@ -84,15 +98,26 @@ MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" TypeExpr;
 
-ImplementationDefinition. Decl5 ::= "implement" TypeExpr "{" [Decl10] "}" ;
 
-separator DollarIdent "," ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [Decl10] "}" ;
 
-TypeDefinition_Class.  Decl7 ::= "class" UpperIdent "<!" [DollarIdent] "!>" "{" [VariantDefinition] [Decl10] "}" ;
--- TypeDefinition_Struct.   Decl7 ::= "struct" UpperIdent "<!" [DollarIdent] "!>" "{" [Decl10] "}" ;
+-- Sgn == Signature
+MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
+MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= "<!" [TypeParamDef] "!>" ;
+
+separator TypeParamDef "," ;
+TypeParamDef_.  TypeParamDef ::= MaybeSubclasses DollarIdent MaybeSuperclasses ;
+
+MaybeSubclasses_None. MaybeSubclasses ::= ;
+MaybeSubclasses_Some. MaybeSubclasses ::= [TypeExpr] "<" ;
+
+MaybeSuperclasses_None. MaybeSuperclasses ::= ;
+MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" [TypeExpr] ;
 
 separator VariantDefinition "" ;
-VariantDefinition_. VariantDefinition ::= UpperIdent "(" [TypeExpr] ")" ;
+VariantDefinition_. VariantDefinition ::= UpperIdent "{" [Decl10] "}" ;
 
 
 -- -- --
@@ -108,28 +133,32 @@ separator Stmt "" ;
 
 Stmt_Decl.          Stmt ::= Decl11 ;
 Stmt_Expr.          Stmt ::= Expr ;
+Stmt_Let.           Stmt ::= "let" LowerIdent "=" Expr ;  -- constant
+Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
+Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
-Stmt_Return.        Stmt ::= "return" ;
 Stmt_ReturnValue.   Stmt ::= "return" Expr ;
 Stmt_PrintValue.    Stmt ::= "print" Expr ;
 Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
+Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
--- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
--- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
--- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
+Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
+Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
+Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
+Stmt_Break.         Stmt ::= "break" ;
+Stmt_Continue.      Stmt ::= "continue" ;
+Stmt_Assert.        Stmt ::= "assert" Expr ;
 
 AssignOper_Assign. AssignOper ::= "=" ;
--- AssignOper_Inc.    AssignOper ::= "+=" ;
--- AssignOper_Dec.    AssignOper ::= "-=" ;
--- AssignOper_Mul.    AssignOper ::= "*=" ;
--- AssignOper_Pow.    AssignOper ::= "**=" ;
--- AssignOper_Div.    AssignOper ::= "/=" ;
--- AssignOper_IDiv.   AssignOper ::= "//=" ;
--- AssignOper_Mod.    AssignOper ::= "%=" ;
--- AssignOper_Xor.    AssignOper ::= "^=" ;
--- AssignOper_BitAnd. AssignOper ::= "&=" ;
--- AssignOper_BitOr.  AssignOper ::= "|=" ;
--- AssignOper_BitNot. AssignOper ::= "~=" ;
+AssignOper_Inc.    AssignOper ::= "+=" ;
+AssignOper_Dec.    AssignOper ::= "-=" ;
+AssignOper_Mul.    AssignOper ::= "*=" ;
+AssignOper_Div.    AssignOper ::= "/=" ;
+AssignOper_IDiv.   AssignOper ::= "//=" ;
+
+separator CaseClause "" ;
+CaseClause_Unnamed.  CaseClause ::= [TypeExpr] StatementBlock ;
+CaseClause_As.       CaseClause ::= TypeExpr "as" LowerIdent StatementBlock ;
 
 ElseClauses_None. ElseClauses ::= ;
 ElseClauses_Else. ElseClauses ::= "else"  StatementBlock ;
@@ -155,12 +184,14 @@ Expr_And.       Expr3 ::= Expr3 "and" Expr4 ;
 
 _.              Expr4 ::= Expr5 ;
 Expr_Not.       Expr4 ::= "not" Expr4 ;
-Expr_In.        Expr4 ::= Expr5 "in" Expr5 ;
-Expr_NotIn.     Expr4 ::= Expr5 "not" "in" Expr5 ;
+-- Expr_In.        Expr4 ::= Expr5 "in" Expr5 ;
+-- Expr_NotIn.     Expr4 ::= Expr5 "not" "in" Expr5 ;
 
 _.              Expr5 ::= Expr6 ;
 Expr_RelOper.   Expr5 ::= Expr5 RelOper Expr6 ;
 
+RelOper_Id.  RelOper ::= "===" ;
+RelOper_Nid. RelOper ::= "/==" ;
 RelOper_Eq.  RelOper ::= "==" ;
 RelOper_Neq. RelOper ::= "/=" ;
 RelOper_Lt.  RelOper ::= "<" ;
@@ -174,22 +205,26 @@ Expr_Sub.       Expr6 ::= Expr6 "-" Expr7 ;
 
 _.              Expr7 ::= Expr8 ;
 Expr_Mul.       Expr7 ::= Expr7 "*" Expr8 ;
--- Expr_Div.       Expr7 ::= Expr7 "/" Expr8 ;
--- Expr_IntDiv.    Expr7 ::= Expr7 "//" Expr8 ;
--- Expr_Mod.       Expr7 ::= Expr7 "%" Expr8 ;
+Expr_Div.       Expr7 ::= Expr7 "/" Expr8 ;
+Expr_IntDiv.    Expr7 ::= Expr7 "//" Expr8 ;
+Expr_Mod.       Expr7 ::= Expr7 "%" Expr8 ;
 
 _.              Expr8 ::= Expr9 ;
 Expr_Minus.     Expr8 ::= "-" Expr8 ;
 Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
 _.              Expr9 ::= Expr10 ;
-Expr_Pow.       Expr9 ::= Expr10 "**" Expr9 ;
+Expr_Cast.      Expr9 ::= Expr10 "as" TypeExpr ;
+Expr_Is.        Expr9 ::= Expr10 "is" TypeExpr ;  -- isinstance
 
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
-Expr_Attr.      Expr10 ::= Expr10 "." LowerIdent ;
+Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
+Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent MaybeTemplateParams;
 Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
 
+MaybeTemplateParams_None.  MaybeTemplateParams ::= ;
+MaybeTemplateParams_Some.  MaybeTemplateParams ::= "<!" [TypeExpr] "!>" ;
 
 separator FunCallArg "," ;
 FunCallArg_Positional. FunCallArg ::= Expr ;
@@ -198,7 +233,7 @@ FunCallArg_Keyword.    FunCallArg ::= LowerIdent "=" Expr ;
 _.              Expr11 ::= Expr12 ;
 Expr_Char.      Expr11 ::= Char ;
 Expr_String.    Expr11 ::= String ;
--- Expr_Double.    Expr11 ::= Double ;
+Expr_Double.    Expr11 ::= Double ;
 Expr_Int.       Expr11 ::= Integer ;
 Expr_Tuple.     Expr11 ::= TupleVal ;
 Expr_Array.     Expr11 ::= BnfcSucksListVal ;
@@ -210,7 +245,7 @@ TupleVal_0.     TupleVal ::= "(" ")" ;
 TupleVal_1.     TupleVal ::= "(" Expr "," ")" ;
 TupleVal_More.  TupleVal ::= "(" Expr "," [Expr] MaybeComma ")" ;
 
--- Using just `ListVal` doesn't work, because bnfc sucks (some kind of bug)
+-- Using just `ListVal` doesn't work, because bnfc sucks (some kind of bug - conflict with built-in type names)
 BnfcSucksListVal_0.      BnfcSucksListVal ::= "[" "]" ;
 BnfcSucksListVal_More.   BnfcSucksListVal ::= "[" [Expr] MaybeComma "]" ;
 
