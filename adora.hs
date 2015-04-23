@@ -1,10 +1,14 @@
-module Adora where
+module Main where
 
 import Control.Monad.Error
 import qualified Data.Map as M
+import System.Environment
 import System.Exit(exitFailure)
+import System.IO
 
 import Absadora
+import ErrM
+import Paradora
 
 type VarName = String
 type ClassName = String
@@ -36,14 +40,17 @@ data Value = ValVoid
              } deriving Show
 type AttrDict = M.Map VarName Pointer
 
-memFrame :: Memory -> Fid -> Frame
-memFrame mem fid = (memFrames mem) M.! fid
+memFrame :: Memory -> Frame
+memFrame mem = (memFrames mem) M.! (memFid mem)
 
 memGet :: Memory -> Pointer -> Value
 memGet mem pt = (memValues mem) M.! pt
 
 memSet :: Memory -> Pointer -> Value -> Memory
 memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
+
+setFid :: Fid -> Memory -> Memory
+setFid fid mem = mem{memFid=fid}
 
 alloc :: Value -> Memory -> (Pointer, Memory)
 alloc v mem = do
@@ -53,10 +60,10 @@ alloc v mem = do
         memValues=M.insert pt v (memValues mem)
     })
 
-allocFrame :: Fid -> Memory -> (Fid, Memory)
-allocFrame parentFid mem = do
+allocFrame :: Memory -> (Fid, Memory)
+allocFrame mem = do
     let frame = Frame{
-        frameParentId=parentFid,
+        frameParentId=memFid mem,
         frameContent=M.empty
     }
     let fid = memNextFid mem
@@ -65,36 +72,40 @@ allocFrame parentFid mem = do
         memFrames=M.insert fid frame $ memFrames mem
     })
 
-frameParent :: Frame -> Memory -> Frame
-frameParent f mem = memFrame mem $ frameParentId f
+-- frameGet :: Frame -> FrameKey -> Memory -> Value
+-- frameGet f k mem = memGet mem $ frameGetPt f k
+--
+-- frameGetPt :: Frame -> FrameKey -> Pointer
+-- frameGetPt f k = (frameContent f) M.! k
 
-frameGet :: Frame -> FrameKey -> Memory -> Value
-frameGet f k mem = memGet mem $ frameGetPt f k
+getVarPt :: FrameKey -> Memory -> Pointer
+getVarPt k mem = do
+    getVarPt' $ memFrame mem
+    where
+        frames = memFrames mem
+        getVarPt' f = do
+            case M.lookup k (frameContent f) of
+                Just pt -> pt
+                Nothing -> getVarPt' (frames M.! (frameParentId f))
 
-frameGetPt :: Frame -> FrameKey -> Pointer
-frameGetPt f k = (frameContent f) M.! k
+getVar :: FrameKey -> Memory -> Value
+getVar k mem = memGet mem $ getVarPt k mem
 
-getVarPt :: FrameKey -> Fid -> Memory -> Pointer
-getVarPt k fid mem = do
-    let f = memFrame mem fid
-    case M.lookup k (frameContent f) of
-         Just pt -> pt
-         Nothing -> getVarPt k (frameParentId f) mem
+allocVar :: FrameKey -> Value -> Memory -> Memory
+allocVar k v mem = do
+    allocVarFid (memFid mem) k v mem
 
-getVar :: FrameKey -> Fid -> Memory -> Value
-getVar k fid mem = memGet mem $ getVarPt k fid mem
-
-allocVar :: FrameKey -> Value -> Fid -> Memory -> Memory
-allocVar k v fid mem = do
+allocVarFid :: Fid -> FrameKey -> Value -> Memory -> Memory
+allocVarFid fid k v mem = do
     let (pt, mem') = alloc v mem
     let frames = memFrames mem
     let frame = frames M.! fid
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
     mem'{memFrames=M.insert fid frame' frames}
 
-assignVar :: FrameKey -> Value -> Fid -> Memory -> Memory
-assignVar k v fid mem = do
-    memSet mem (getVarPt k fid mem) v
+assignVar :: FrameKey -> Value -> Memory -> Memory
+assignVar k v mem = do
+    memSet mem (getVarPt k mem) v
 
 
 data Env = Env {
@@ -216,19 +227,67 @@ emptyMem = Memory {
 
 moduleSem :: Module -> SemanticErrorOr (IO ())
 moduleSem (Module_ stmts) = do
-    k <- stmtBlockSem (StatementBlock_ stmts) globalEnv
-    return $ k (\_ -> return ()) emptyMem
+    msem <- stmtBlockSem (StatementBlock_ stmts) globalEnv
+    return $ msem (\_ -> return ()) emptyMem
 
 notYet :: String -> a
 notYet s = error $ "Tego jeszcze nie ma: " ++ s
 
 stmtBlockSem :: StatementBlock -> Env -> SemanticErrorOr (Cont -> Cont)
-stmtBlockSem = notYet "stmtBlockSem"
-stmtSem :: Stmt -> Env -> SemanticErrorOr (Cont -> Cont)
-stmtSem = notYet "stmtSem"
+stmtBlockSem (StatementBlock_ stmts) outerEnv = do
+    hoistedEnv <- return outerEnv  -- TODO: hoisting
+    (_, kk) <- foldl f (return (hoistedEnv, id)) stmts
+    return kk
+    where
+        f prev stmt = do
+            (env, sem1) <- prev
+            (env', sem2) <- stmtSem stmt env
+            return (env', sem1.sem2)
+
+
+stmtSem :: Stmt -> Env -> SemanticErrorOr (Env, (Cont -> Cont))
+stmtSem (Stmt_Expr expr) env = do
+    esem <- exprSem expr env
+--     return (env, esem.const)  -- tak to docelowo ma wygladac, ale debugowo wypisuje wartosci
+    return (env, esem.(\k v m -> (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) >> (k m)))
+
+stmtSem _ _ = notYet "stmtSem"
+
 exprSem :: Expr -> Env -> SemanticErrorOr (ContE -> Cont)
-exprSem = notYet "exprSem"
-declSem :: Decl -> Env -> SemanticErrorOr (ContE -> Cont)
+exprSem (Expr_Char c) _ = return ($ (ValChar c))
+-- exprSem (Expr_String c) _ =
+-- exprSem (Expr_Double d) _ = return ($ (ValDouble d))
+exprSem (Expr_Int i) _ = return ($ (ValInt $ fromInteger i))
+-- exprSem (Expr_Tuple _) _ = ???
+-- exprSem (Expr_Array _) _ = ???
+exprSem (Expr_Var (LowerIdent (_, v))) _ = do
+    -- TODO: check env
+    return $ \ke m -> ke (getVar v m) m
+-- exprSem (Expr_Type _) _ = ???
+
+exprSem (Expr_Add exp1 exp2) env = intBinopSem (+) exp1 exp2 env
+exprSem (Expr_Sub exp1 exp2) env = intBinopSem (-) exp1 exp2 env
+exprSem (Expr_Mul exp1 exp2) env = intBinopSem (*) exp1 exp2 env
+-- exprSem (Expr_Div exp1 exp2) env = ??? / exp1 exp2 env
+exprSem (Expr_IntDiv exp1 exp2) env = intBinopSem div exp1 exp2 env
+exprSem (Expr_Mod exp1 exp2) env = intBinopSem mod exp1 exp2 env
+
+-- Expr_Minus.     Expr8 ::= "-" Expr8 ;
+-- Expr_Plus.      Expr8 ::= "+" Expr8 ;
+
+exprSem _ _ = notYet "exprSem"
+
+intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Env ->
+    SemanticErrorOr (ContE -> Cont)
+intBinopSem op exp1 exp2 env = do
+    e1sem <- exprSem exp1 env
+    e2sem <- exprSem exp2 env
+    return $ \ke ->
+        e1sem $ \(ValInt v1) ->
+            e2sem $ \(ValInt v2) ->
+                ke $ ValInt $ v1 `op` v2
+
+declSem :: Decl -> Env -> SemanticErrorOr (Env, (Cont -> Cont))
 declSem = notYet "declSem"
 
 type SemanticErrorOr s = Either SemanticError s
@@ -241,10 +300,26 @@ instance Error SemanticError where
 showSemError :: SemanticError -> String
 showSemError (SemanticError s) = "SemanticError: " ++ s
 
+
 main :: IO ()
-main = return ()
---     case stmtBlockSem (StatementBlock stmts) globalEnv of
---         Left err -> do
---             hPutStrLn stderr $ showSemError err
---             exitFailure
---         Right k ->
+main = do
+    args <- getArgs
+    code <- case args of
+        [] -> do
+            getContents
+        [programPath] -> do
+            readFile programPath
+        _ -> do
+            progName <- getProgName
+            hPutStrLn stderr $ "Usage:\n    " ++ progName ++ " [FILE PATH]\n"
+            exitFailure
+    case pModule $ myLexer $ code of
+        Bad errmsg -> do
+            hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
+            exitFailure
+        Ok moduleSyntax -> do
+            case moduleSem moduleSyntax of
+                Left errmsg -> do
+                    hPutStrLn stderr $ showSemError errmsg
+                    exitFailure
+                Right runModule -> runModule
