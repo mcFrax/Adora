@@ -80,6 +80,7 @@ PropDeclClause_SecAttr.  PropDeclClause1 ::= PropAttrName PropDeclClause2 ;
 
 PropDeclClause_Def.      PropDeclClause2 ::= TypeExpr MaybePropAttrDef ;
 PropDeclClause_Auto.     PropDeclClause2 ::= "auto" ;
+PropDeclClause_Undef.     PropDeclClause2 ::= "undefined" ;
 
 MaybePropAttrDef_None.   MaybePropAttrDef ::= ;
 MaybePropAttrDef_Some.   MaybePropAttrDef ::= StatementBlock ;
