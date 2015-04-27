@@ -10,6 +10,8 @@ import Absadora
 import ErrM
 import Paradora
 
+import SemanticMonad
+
 type VarName = String
 type ClassName = String
 type StructName = String
@@ -30,7 +32,8 @@ data Frame = Frame {
     frameContent :: M.Map FrameKey Pointer  -- frame index -> memory index
 } deriving Show
 
-data Value = ValVoid
+data Value = ValNull
+           | ValFunction MthImpl
            | ValInt { valToInt :: Int }
            | ValChar { valToChar :: Char }
            | ValRef { valToRef :: Pointer }
@@ -225,13 +228,11 @@ emptyMem = Memory {
         frameContent=M.empty
     }
 
+
 moduleSem :: Module -> SemanticErrorOr (IO ())
 moduleSem (Module_ stmts) = do
     msem <- stmtBlockSem (StatementBlock_ stmts) globalEnv
     return $ msem (\_ -> return ()) emptyMem
-
-notYet :: String -> a
-notYet s = error $ "Tego jeszcze nie ma: " ++ s
 
 stmtBlockSem :: StatementBlock -> Env -> SemanticErrorOr (Cont -> Cont)
 stmtBlockSem (StatementBlock_ stmts) outerEnv = do
@@ -244,14 +245,13 @@ stmtBlockSem (StatementBlock_ stmts) outerEnv = do
             (env', sem2) <- stmtSem stmt env
             return (env', sem1.sem2)
 
-
 stmtSem :: Stmt -> Env -> SemanticErrorOr (Env, (Cont -> Cont))
 stmtSem (Stmt_Expr expr) env = do
     esem <- exprSem expr env
 --     return (env, esem.const)  -- tak to docelowo ma wygladac, ale debugowo wypisuje wartosci
     return (env, esem.(\k v m -> (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) >> (k m)))
 
-stmtSem _ _ = notYet "stmtSem"
+stmtSem _ _ = undefined
 
 exprSem :: Expr -> Env -> SemanticErrorOr (ContE -> Cont)
 exprSem (Expr_Char c) _ = return ($ (ValChar c))
@@ -275,30 +275,18 @@ exprSem (Expr_Mod exp1 exp2) env = intBinopSem mod exp1 exp2 env
 -- Expr_Minus.     Expr8 ::= "-" Expr8 ;
 -- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
-exprSem _ _ = notYet "exprSem"
+exprSem _ _ = undefined
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Env ->
     SemanticErrorOr (ContE -> Cont)
 intBinopSem op exp1 exp2 env = do
     e1sem <- exprSem exp1 env
     e2sem <- exprSem exp2 env
-    return $ \ke ->
-        e1sem $ \(ValInt v1) ->
-            e2sem $ \(ValInt v2) ->
-                ke $ ValInt $ v1 `op` v2
+    return $ \ke -> e1sem $ \v1 -> e2sem $ \v2 ->
+                ke $ ValInt $ (valToInt v1) `op` (valToInt v2)
 
 declSem :: Decl -> Env -> SemanticErrorOr (Env, (Cont -> Cont))
-declSem = notYet "declSem"
-
-type SemanticErrorOr s = Either SemanticError s
-
-data SemanticError = SemanticError String
-
-instance Error SemanticError where
-  strMsg = SemanticError
-
-showSemError :: SemanticError -> String
-showSemError (SemanticError s) = "SemanticError: " ++ s
+declSem = undefined
 
 
 main :: IO ()
