@@ -1,8 +1,5 @@
 module Memory where
 
-import Control.Monad
-import Control.Monad.State.Class
-
 import qualified Data.Map as M
 import Data.Maybe
 
@@ -20,16 +17,10 @@ memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
 
-alloc' :: Value -> Memory -> (Pointer, Memory)
-alloc' v mem = do
+alloc :: Value -> Memory -> (Pointer, Memory)
+alloc v mem = do
     let (pt, values) = insertNext 0 v $ memValues mem
     (pt, mem{memValues=values})
-
-alloc :: Value -> Exe Pointer
-alloc val = do
-    (pt, mem') <- liftM (alloc' val) get
-    put mem'
-    return pt
 
 allocFrame :: Memory -> (Fid, Memory)
 allocFrame mem = do
@@ -65,7 +56,7 @@ allocVar k v mem = do
 
 allocVarFid :: Fid -> FrameKey -> Value -> Memory -> Memory
 allocVarFid fid k v mem = do
-    let (pt, mem') = alloc' v mem
+    let (pt, mem') = alloc v mem
     let frames = memFrames mem
     let frame = frames M.! fid
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
@@ -75,8 +66,8 @@ assignVar :: FrameKey -> Value -> Memory -> Memory
 assignVar k v mem = do
     memSet mem (getVarPt k mem) v
 
-insertNext :: Ord k => k -> a -> M.Map k a -> (k, M.Map k a)
+insertNext :: (Num k, Ord k) => k -> a -> M.Map k a -> (k, M.Map k a)
 insertNext firstKey v m = do
     (key, M.insert key v m)
     where
-        key = if M.null m then firstKey else fst $ M.findMax m
+        key = if M.null m then firstKey else (fst $ M.findMax m) + 1

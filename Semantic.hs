@@ -4,7 +4,6 @@ module Semantic where
 
 import Control.Monad
 import Control.Monad.Error.Class
-import Control.Monad.IO.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 
@@ -83,7 +82,7 @@ showSemError (SemanticError s) = "SemanticError: " ++ s
 moduleSem :: Module -> Either SemanticError (IO ())
 moduleSem (Module_ stmts) = do
     (sst, _, sem) <- runSemantic (stmtSeqSem stmts) initSemState outerEnv
-    return $ void $ runExe sem (globStructs $ sstGlob sst) emptyMem
+    return $ runExe sem (globStructs $ sstGlob sst) emptyMem
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
@@ -120,41 +119,49 @@ stmtSeqSem :: [Stmt] -> Semantic (Exe ())
 stmtSeqSem stmts = do
     outerEnv <- ask
     hoistedEnv <- return outerEnv  -- TODO: hoisting
-    local (const hoistedEnv) $ do
-        liftM sequence_ $ mapM stmtSem stmts
+    local (const hoistedEnv) $ stmtSeqSem' stmts
+    where
+        stmtSeqSem' [] = return noop
+        stmtSeqSem' (h:t) = do
+            hexe <- stmtSem h
+            modifiedEnv <- ask  -- TODO: env modification
+            texe <- local (const modifiedEnv) $ stmtSeqSem' t
+            return $ hexe.const.texe
 
 stmtSem :: Stmt -> Semantic (Exe ())
-stmtSem (Stmt_Decl _) = return ()
+stmtSem (Stmt_Decl _) = return noop
 
 stmtSem (Stmt_Expr expr) = do
---     liftM exeExpr $ exprSem expr
     esem <- exprSem expr
-    return $ do
-        v <- rValue esem
-        liftIO $ hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)
+    return $ \k -> do
+        -- esem $ \_ -> k ()
+        rValue esem $ \v -> do
+            io (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) k
 
 stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
-    eexe <- liftM rValue $ exprSem expr
+    eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
-    return $ do
-        val <- eexe
-        modify (allocVar varName val)
+    return $ \k -> do
+        rValue eexe $ \val sm mem -> do
+            k () sm $ allocVar varName val mem
 
 stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
-    eexe <- liftM rValue $ exprSem expr
+    eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
-    return $ do
-        val <- eexe
-        modify (allocVar varName val)
+    return $ \k -> do
+        rValue eexe $ \val sm mem -> do
+            k () sm $ allocVar varName val mem
 
-stmtSem (Stmt_Assign (LowerIdent (_, varName)) expr) = do
-    eexe <- liftM rValue $ exprSem expr
+stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
+    lexe <- exprSem lexpr
+    rexe <- exprSem rexpr
 --     typecheck  ...
-    return $ do
-        val <- eexe
-        modify (assignVar varName val)
+    return $ \k -> do
+        lValue lexe $ \pt -> do
+            rValue rexe $ \val sm mem -> do
+                k () sm $ memSet mem pt val
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_ReturnValue.   Stmt ::= "return" Expr ;
@@ -174,24 +181,24 @@ data ExeExpr = RValue (Exe Value)
              | LValue { lValue :: Exe Pointer }
 
 rValue :: ExeExpr -> (Exe Value)
-rValue (RValue e) = e
-rValue (LValue e) = liftM2 memGet get e
+rValue (RValue e) ke = e ke
+rValue (LValue e) ke = e $ \pt sm mem -> ke (memGet mem pt) sm mem
 
 exeExpr :: ExeExpr -> Exe ()
-exeExpr (RValue e) = void e
-exeExpr (LValue e) = void e
+exeExpr (RValue e) = e.const.noop
+exeExpr (LValue e) = e.const.noop
 
 
 exprSem :: Expr -> Semantic ExeExpr
-exprSem (Expr_Char c) = return $ RValue $ return $ ValChar c
+exprSem (Expr_Char c) = return $ RValue ($ ValChar c)
 -- exprSem (Expr_String c) _ =
 -- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
-exprSem (Expr_Int i) = return $ RValue $ return $ ValInt $ fromInteger i
+exprSem (Expr_Int i) = return $ RValue ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (_, varName))) = do
     -- TODO: check env
-    return $ LValue $ liftM (getVarPt varName) get
+    return $ LValue $ \ke sm mem -> ke (getVarPt varName mem) sm mem
 -- exprSem (Expr_Type _) _ = ???
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
@@ -208,9 +215,12 @@ exprSem expr = notYet expr
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExeExpr
 intBinopSem op exp1 exp2 = do
-    e1exe <- liftM rValue $ exprSem exp1
-    e2exe <- liftM rValue $ exprSem exp2
-    return $ RValue $ liftM2 (wrapBinOper valToInt ValInt op) e1exe e2exe
+    e1exe <- exprSem exp1
+    e2exe <- exprSem exp2
+    return $ RValue $ \ke -> do
+        rValue e1exe $ \v1 -> do
+            rValue e2exe $ \v2 -> do
+                ke (wrapBinOper valToInt ValInt op v1 v2)
 
 wrapBinOper :: (b -> a) -> (a -> b) -> (a -> a -> a) -> (b -> b -> b)
 wrapBinOper fromB toB op = (.fromB).(toB.).(op.fromB)

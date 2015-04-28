@@ -1,13 +1,4 @@
-{-# OPTIONS -XMultiParamTypeClasses #-}
-{-# OPTIONS -XTypeSynonymInstances #-}
-{-# OPTIONS -XFlexibleInstances #-}
-
 module Types where
-
-import Control.Monad
-import Control.Monad.IO.Class
-import Control.Monad.Reader.Class
-import Control.Monad.State.Class
 
 import qualified Data.Map as M
 
@@ -106,26 +97,17 @@ data Value = ValNull
 -- Execution
 -- -- --
 
-newtype Exe a = Exe {
-    runExe :: SidMap -> Memory -> IO (SidMap, Memory, a)
-}
+type Cont = SidMap -> Memory -> IO ()
 
-instance Functor Exe where
-    fmap = liftM
+type Exe a = (a -> Cont) -> Cont
 
-instance Monad Exe where
-    exe1 >>= exe2 = Exe $ \sm mem -> do
-        (sm', mem', x) <- runExe exe1 sm mem
-        runExe (exe2 x) sm' mem'
-    return x = Exe $ \sm mem -> return (sm, mem, x)
+runExe :: Exe a -> Cont
+runExe exe = exe (\_ _ _ -> return ())
 
-instance MonadState Memory Exe where
-    get = Exe $ \sm mem -> return (sm, mem, mem)
-    put mem = Exe $ \sm _ -> return (sm, mem, ())
+io :: IO a -> Exe a
+io ioOp ka sm mem = do
+    iores <- ioOp
+    ka iores sm mem
 
-instance MonadReader SidMap Exe where
-    ask = Exe $ \sm mem -> return (sm, mem, sm)
-    local = undefined
-
-instance MonadIO Exe where
-    liftIO io = Exe $ \sm mem -> liftM (\x -> (sm, mem, x)) io
+noop :: Exe ()
+noop = ($ ())
