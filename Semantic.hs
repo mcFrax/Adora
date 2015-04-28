@@ -9,10 +9,11 @@ import Control.Monad.State.Class
 
 import qualified Data.Map as M
 
--- import System.Exit(exitFailure)
+import System.Exit(exitFailure)
 import System.IO
 
 import Absadora
+import Printadora(printTree)
 
 import Memory
 import Types
@@ -209,10 +210,17 @@ stmtSem Stmt_Return = return $ \_ re -> reReturn re ValNull re
 stmtSem (Stmt_ReturnValue expr) = do
     eexe <- exprSem expr
     return $ \_ -> rValue eexe $ \val re -> reReturn re val re
+stmtSem (Stmt_Assert expr) = do
+    eexe <- exprSem expr
+    return $ \k -> rValue eexe $ \val -> do
+        if isTruthy val then
+            k ()
+        else
+            \_ _ -> do
+                hPutStrLn stderr $ "Assertion failed: " ++ (printTree expr)
+                exitFailure
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
--- Stmt_Return.        Stmt ::= "return" ;
--- Stmt_ReturnValue.   Stmt ::= "return" Expr ;
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 -- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
