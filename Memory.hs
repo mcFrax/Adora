@@ -1,5 +1,11 @@
 module Memory where
 
+import Control.Monad
+import Control.Monad.State.Class
+
+import qualified Data.Map as M
+import Data.Maybe
+
 import Types
 
 memFrame :: Memory -> Frame
@@ -14,25 +20,25 @@ memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
 
-alloc :: Value -> Memory -> (Pointer, Memory)
-alloc v mem = do
-    let pt = memNext mem
-    (pt, mem{
-        memNext=(pt + 1),
-        memValues=M.insert pt v (memValues mem)
-    })
+alloc' :: Value -> Memory -> (Pointer, Memory)
+alloc' v mem = do
+    let (pt, values) = insertNext 0 v $ memValues mem
+    (pt, mem{memValues=values})
+
+alloc :: Value -> Exe Pointer
+alloc val = do
+    (pt, mem') <- liftM (alloc' val) get
+    put mem'
+    return pt
 
 allocFrame :: Memory -> (Fid, Memory)
 allocFrame mem = do
     let frame = Frame{
-        frameParentId=memFid mem,
+        frameParentId=Just $ memFid mem,
         frameContent=M.empty
     }
-    let fid = memNextFid mem
-    (fid, mem{
-        memNextFid=(fid+1),
-        memFrames=M.insert fid frame $ memFrames mem
-    })
+    let (fid, frames) = insertNext 0 frame $ memFrames mem
+    (fid, mem{memFrames=frames})
 
 -- frameGet :: Frame -> FrameKey -> Memory -> Value
 -- frameGet f k mem = memGet mem $ frameGetPt f k
@@ -48,7 +54,7 @@ getVarPt k mem = do
         getVarPt' f = do
             case M.lookup k (frameContent f) of
                 Just pt -> pt
-                Nothing -> getVarPt' (frames M.! (frameParentId f))
+                Nothing -> getVarPt' (frames M.! (fromJust $ frameParentId f))
 
 getVar :: FrameKey -> Memory -> Value
 getVar k mem = memGet mem $ getVarPt k mem
@@ -59,7 +65,7 @@ allocVar k v mem = do
 
 allocVarFid :: Fid -> FrameKey -> Value -> Memory -> Memory
 allocVarFid fid k v mem = do
-    let (pt, mem') = alloc v mem
+    let (pt, mem') = alloc' v mem
     let frames = memFrames mem
     let frame = frames M.! fid
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
@@ -68,3 +74,9 @@ allocVarFid fid k v mem = do
 assignVar :: FrameKey -> Value -> Memory -> Memory
 assignVar k v mem = do
     memSet mem (getVarPt k mem) v
+
+insertNext :: Ord k => k -> a -> M.Map k a -> (k, M.Map k a)
+insertNext firstKey v m = do
+    (key, M.insert key v m)
+    where
+        key = if M.null m then firstKey else fst $ M.findMax m

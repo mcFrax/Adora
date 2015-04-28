@@ -1,11 +1,9 @@
 module Main where
 
-import qualified Data.Map as M
 import System.Environment
 import System.Exit(exitFailure)
 import System.IO
 
-import Absadora
 import ErrM
 import Paradora
 

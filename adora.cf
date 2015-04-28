@@ -11,10 +11,9 @@ comment "#";
 -- Lexer - tokens
 
 separator LowerIdent "," ;
-position token LowerIdent (lower (letter | digit | '_')*) ;
+position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' (letter | digit | '_')*) ;
--- position token SpecialIdent ('_' '_' letter (letter | digit | '_')* '_' '_') ;
 
 -- -- --
 -- Utils
