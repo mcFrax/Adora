@@ -31,11 +31,8 @@ allocFrame mem = do
     let (fid, frames) = insertNext 0 frame $ memFrames mem
     (fid, mem{memFrames=frames})
 
--- frameGet :: Frame -> FrameKey -> Memory -> Value
--- frameGet f k mem = memGet mem $ frameGetPt f k
---
--- frameGetPt :: Frame -> FrameKey -> Pointer
--- frameGetPt f k = (frameContent f) M.! k
+popFrame :: Memory -> Memory
+popFrame mem = mem{memFid=fromJust $ frameParentId $ memFrame mem}
 
 getVarPt :: FrameKey -> Memory -> Pointer
 getVarPt k mem = do

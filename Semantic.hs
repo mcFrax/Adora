@@ -185,11 +185,28 @@ stmtSem (Stmt_If condexpr block elses) = do
         elseSem (ElseClauses_Elif elifcondexpr elseBlock moreElses) = do
             stmtSem (Stmt_If elifcondexpr elseBlock moreElses)
 
+stmtSem (Stmt_While condexpr block) = do
+    exeCond <- exprSem condexpr
+    exeBody <-stmtBlockSem block
+    return $ fix $ \exeLoop k re -> do
+        let re' = re{reBreak=(\_ -> k () re)}
+        let k' = rValue exeCond $ \condVal _ -> do
+            if isTruthy condVal then
+                exeBody (\_ _ -> exeLoop k re) re'
+            else
+                k () re
+        k' re'
+    where
+        fix :: (a -> a) -> a
+        fix f = f $ fix f
+
+stmtSem Stmt_Break = return $ \_ re -> reBreak re re
+
+
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Return.        Stmt ::= "return" ;
 -- Stmt_ReturnValue.   Stmt ::= "return" Expr ;
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
--- Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 -- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
 -- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
