@@ -1,4 +1,4 @@
--- Pyf language
+-- Adora language
 
 entrypoints Module;
 
@@ -143,8 +143,8 @@ Stmt_Let.           Stmt ::= "let" LowerIdent "=" Expr ;  -- constant
 Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
+Stmt_Return.        Stmt ::= "return" ;
 Stmt_ReturnValue.   Stmt ::= "return" Expr ;
-Stmt_PrintValue.    Stmt ::= "print" Expr ;
 Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
 Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;

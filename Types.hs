@@ -31,6 +31,13 @@ data GlobEnv = GlobEnv {
     globStructs :: SidMap
 }
 
+data RunEnv = RunEnv {
+    reStructs :: SidMap,
+    reReturn :: Value -> Cont,
+    reBreak :: Cont,
+    reContinue :: Cont
+}
+
 data ClassDesc = ClassDesc {
     className :: String,
     classProps :: M.Map VarName VarType,
@@ -85,6 +92,7 @@ data Frame = Frame {
 } deriving Show
 
 data Value = ValNull
+           | ValBool { valToBool :: Bool }
            | ValFunction FunImpl
            | ValInt { valToInt :: Int }
            | ValChar { valToChar :: Char }
@@ -97,7 +105,7 @@ data Value = ValNull
 -- Execution
 -- -- --
 
-type Cont = SidMap -> Memory -> IO ()
+type Cont = RunEnv -> Memory -> IO ()
 
 type Exe a = (a -> Cont) -> Cont
 
@@ -105,9 +113,9 @@ runExe :: Exe a -> Cont
 runExe exe = exe (\_ _ _ -> return ())
 
 io :: IO a -> Exe a
-io ioOp ka sm mem = do
+io ioOp ka re mem = do
     iores <- ioOp
-    ka iores sm mem
+    ka iores re mem
 
 noop :: Exe ()
 noop = ($ ())

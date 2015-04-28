@@ -82,7 +82,13 @@ showSemError (SemanticError s) = "SemanticError: " ++ s
 moduleSem :: Module -> Either SemanticError (IO ())
 moduleSem (Module_ stmts) = do
     (sst, _, sem) <- runSemantic (stmtSeqSem stmts) initSemState outerEnv
-    return $ runExe sem (globStructs $ sstGlob sst) emptyMem
+    let runEnv = RunEnv {
+        reStructs=globStructs $ sstGlob sst,
+        reReturn=undefined,
+        reBreak=undefined,
+        reContinue=undefined
+    }
+    return $ runExe sem runEnv emptyMem
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
@@ -143,16 +149,16 @@ stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
 --     check for shadowing ...
 --     modifyEnv ...
     return $ \k -> do
-        rValue eexe $ \val sm mem -> do
-            k () sm $ allocVar varName val mem
+        rValue eexe $ \val re mem -> do
+            k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
     eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
     return $ \k -> do
-        rValue eexe $ \val sm mem -> do
-            k () sm $ allocVar varName val mem
+        rValue eexe $ \val re mem -> do
+            k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
     lexe <- exprSem lexpr
@@ -160,12 +166,11 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
 --     typecheck  ...
     return $ \k -> do
         lValue lexe $ \pt -> do
-            rValue rexe $ \val sm mem -> do
-                k () sm $ memSet mem pt val
+            rValue rexe $ \val re mem -> do
+                k () re $ memSet mem pt val
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_ReturnValue.   Stmt ::= "return" Expr ;
--- Stmt_PrintValue.    Stmt ::= "print" Expr ;
 -- Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 -- Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
@@ -177,12 +182,13 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
 -- Stmt_Assert.        Stmt ::= "assert" Expr ;
 stmtSem stmt = notYet stmt
 
+
 data ExeExpr = RValue (Exe Value)
              | LValue { lValue :: Exe Pointer }
 
 rValue :: ExeExpr -> (Exe Value)
 rValue (RValue e) ke = e ke
-rValue (LValue e) ke = e $ \pt sm mem -> ke (memGet mem pt) sm mem
+rValue (LValue e) ke = e $ \pt re mem -> ke (memGet mem pt) re mem
 
 exeExpr :: ExeExpr -> Exe ()
 exeExpr (RValue e) = e.const.noop
@@ -198,8 +204,17 @@ exprSem (Expr_Int i) = return $ RValue ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (_, varName))) = do
     -- TODO: check env
-    return $ LValue $ \ke sm mem -> ke (getVarPt varName mem) sm mem
+    return $ LValue $ \ke re mem -> ke (getVarPt varName mem) re mem
 -- exprSem (Expr_Type _) _ = ???
+
+exprSem (Expr_RelOper exp1 RelOper_Eq exp2) = do
+    -- TODO: laczenie operatorow,
+    e1exe <- exprSem exp1
+    e2exe <- exprSem exp2
+    return $ RValue $ \ke -> do
+        rValue e1exe $ \(ValInt v1) -> do
+            rValue e2exe $ \(ValInt v2) -> do
+                ke (ValBool $ v1 == v2)
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
 exprSem (Expr_Sub exp1 exp2) = intBinopSem (-) exp1 exp2
@@ -213,17 +228,16 @@ exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
 
 exprSem expr = notYet expr
 
+
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExeExpr
 intBinopSem op exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
     return $ RValue $ \ke -> do
-        rValue e1exe $ \v1 -> do
-            rValue e2exe $ \v2 -> do
-                ke (wrapBinOper valToInt ValInt op v1 v2)
+        rValue e1exe $ \(ValInt v1) -> do
+            rValue e2exe $ \(ValInt v2) -> do
+                ke $ ValInt $ op v1 v2
 
-wrapBinOper :: (b -> a) -> (a -> b) -> (a -> a -> a) -> (b -> b -> b)
-wrapBinOper fromB toB op = (.fromB).(toB.).(op.fromB)
 
 declSem :: Decl -> Semantic (Exe ())
 declSem decl = notYet decl
