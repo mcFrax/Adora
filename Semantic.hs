@@ -169,9 +169,25 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
             rValue rexe $ \val re mem -> do
                 k () re $ memSet mem pt val
 
+stmtSem (Stmt_If condexpr block elses) = do
+    exeCond <- exprSem condexpr
+    exeThen <-stmtBlockSem block
+    exeElse <- elseSem elses
+    return $ \k ->
+        rValue exeCond $ \condVal ->
+            if isTruthy condVal then
+                exeThen k
+            else
+                exeElse k
+    where
+        elseSem ElseClauses_None = return noop
+        elseSem (ElseClauses_Else elseBlock) = stmtBlockSem elseBlock
+        elseSem (ElseClauses_Elif elifcondexpr elseBlock moreElses) = do
+            stmtSem (Stmt_If elifcondexpr elseBlock moreElses)
+
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
+-- Stmt_Return.        Stmt ::= "return" ;
 -- Stmt_ReturnValue.   Stmt ::= "return" Expr ;
--- Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 -- Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
@@ -193,6 +209,10 @@ rValue (LValue e) ke = e $ \pt re mem -> ke (memGet mem pt) re mem
 exeExpr :: ExeExpr -> Exe ()
 exeExpr (RValue e) = e.const.noop
 exeExpr (LValue e) = e.const.noop
+
+isTruthy :: Value -> Bool
+isTruthy = valToBool
+-- TODO: isTruthy for other values
 
 
 exprSem :: Expr -> Semantic ExeExpr
