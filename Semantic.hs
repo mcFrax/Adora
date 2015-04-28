@@ -189,7 +189,10 @@ stmtSem (Stmt_While condexpr block) = do
     exeCond <- exprSem condexpr
     exeBody <-stmtBlockSem block
     return $ fix $ \exeLoop k re -> do
-        let re' = re{reBreak=(\_ -> k () re)}
+        let re' = re{
+            reBreak=(\_ -> k () re),
+            reContinue=(\_ -> exeLoop k re)
+        }
         let k' = rValue exeCond $ \condVal _ -> do
             if isTruthy condVal then
                 exeBody (\_ _ -> exeLoop k re) re'
@@ -201,7 +204,11 @@ stmtSem (Stmt_While condexpr block) = do
         fix f = f $ fix f
 
 stmtSem Stmt_Break = return $ \_ re -> reBreak re re
-
+stmtSem Stmt_Continue = return $ \_ re -> reContinue re re
+stmtSem Stmt_Return = return $ \_ re -> reReturn re ValNull re
+stmtSem (Stmt_ReturnValue expr) = do
+    eexe <- exprSem expr
+    return $ \_ -> rValue eexe $ \val re -> reReturn re val re
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Return.        Stmt ::= "return" ;
@@ -210,8 +217,6 @@ stmtSem Stmt_Break = return $ \_ re -> reBreak re re
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 -- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
 -- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
--- Stmt_Break.         Stmt ::= "break" ;
--- Stmt_Continue.      Stmt ::= "continue" ;
 -- Stmt_Assert.        Stmt ::= "assert" Expr ;
 stmtSem stmt = notYet stmt
 
