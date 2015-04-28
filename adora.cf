@@ -29,17 +29,11 @@ separator TypeExpr "," ;
 _. TypeExpr ::= TypeExpr0 ;  -- not function notation
 _. TypeExpr ::= TypeExpr1 ;  -- function notation
 
-_. TypeExpr0 ::= "(" TypeExpr ")" ;
-_. TypeExpr0 ::= TypeExpr2 ;  -- primitive types
-_. TypeExpr0 ::= TypeExpr3 ;  -- type variables
-_. TypeExpr0 ::= TypeExpr4 ;  -- complex types
-
-TypeExpr_Name.  TypeExpr2 ::= UpperIdent ;
-
-TypeExpr_Var.  TypeExpr3 ::= DollarIdent ;
-
-TypeExpr_Qualified.  TypeExpr4 ::= TypeExpr0 "." UpperIdent ;
-TypeExpr_Insta.      TypeExpr4 ::= TypeExpr0 "<!" [TypeExpr] "!>" ;
+_.                   TypeExpr0 ::= "(" TypeExpr ")" ;
+TypeExpr_Name.       TypeExpr0 ::= UpperIdent ;
+TypeExpr_Var.        TypeExpr0 ::= DollarIdent ;
+TypeExpr_Qualified.  TypeExpr0 ::= TypeExpr0 "." UpperIdent ;
+TypeExpr_Insta.      TypeExpr0 ::= TypeExpr0 "<!" [TypeExpr] "!>" ;
 
 TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
 
@@ -52,8 +46,8 @@ TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
 -- zeby wszystkie deklaracje mialy ten sam typ w haskellowej implementacji,
 -- a jednoczesnie potrzebowalem niektore rodzaje deklaracji oddzielic.
 
-separator Decl10 "" ;
-separator Decl11 "" ;
+separator Decl10 ";" ;
+separator Decl11 ";" ;
 
 _.  Decl ::= Decl0 ;  -- declarations available only in class/struct definition
 -- _.  Decl ::= Decl1 ;  -- declarations available only outside class/struct definition
@@ -67,9 +61,9 @@ _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definit
 
 _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
 MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
-ImplementationDefinition.   Decl0 ::= "implement" TypeExpr "{" [Decl10] "}" ;
+ImplementationDefinition.   Decl0 ::= "implement" TypeExpr ":" "{" [Decl10] "}" ;
 FieldDefinition.            Decl0 ::= TypeExpr LowerIdent MaybeDefaultVal ;
-PropertyDeclaration.        Decl0 ::= "pro" LowerIdent "{" [PropDeclClause] "}" ;
+PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" [PropDeclClause] "}" ;
 
 separator PropDeclClause "" ;
 PropDeclClause_.   PropDeclClause ::= PropAttrName PropDeclClause1 ;
@@ -105,9 +99,9 @@ OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" TypeExpr;
 
 
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" "{" [Decl10] "}" ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -123,7 +117,7 @@ MaybeSubclasses_None. MaybeSubclasses ::= ;
 MaybeSubclasses_Some. MaybeSubclasses ::= ">" [TypeExpr] ;
 
 separator VariantDefinition "" ;
-VariantDefinition_. VariantDefinition ::= UpperIdent "{" [Decl10] "}" ;
+VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
 
 
 -- -- --
@@ -131,9 +125,11 @@ VariantDefinition_. VariantDefinition ::= UpperIdent "{" [Decl10] "}" ;
 
 -- Blocks
 
-StatementBlock_. StatementBlock ::= "{" [Stmt] "}" ;
+StatementBlock_. StatementBlock ::= ":" "{" [Stmt] "}" ;
 
-separator Stmt "" ;
+layout ":" ;
+
+separator Stmt ";" ;
 
 -- Statements
 
@@ -146,7 +142,7 @@ Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
 Stmt_Return.        Stmt ::= "return" ;
 Stmt_ReturnValue.   Stmt ::= "return" Expr ;
 Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
-Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
+Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
@@ -197,9 +193,9 @@ _.              Expr5 ::= Expr6 ;
 Expr_RelOper.   Expr5 ::= Expr5 RelOper Expr6 ;
 
 RelOper_Id.  RelOper ::= "===" ;
-RelOper_Nid. RelOper ::= "/==" ;
+RelOper_Nid. RelOper ::= "!==" ;
 RelOper_Eq.  RelOper ::= "==" ;
-RelOper_Neq. RelOper ::= "/=" ;
+RelOper_Neq. RelOper ::= "!=" ;
 RelOper_Lt.  RelOper ::= "<" ;
 RelOper_Lte. RelOper ::= "<=" ;
 RelOper_Gt.  RelOper ::= ">" ;
@@ -244,7 +240,7 @@ Expr_Int.       Expr11 ::= Integer ;
 Expr_Tuple.     Expr11 ::= TupleVal ;
 Expr_Array.     Expr11 ::= BnfcSucksListVal ;
 Expr_Var.       Expr11 ::= LowerIdent ;
-Expr_Type.      Expr11 ::= TypeExpr ;
+Expr_Type.      Expr11 ::= "[" TypeExpr "]" ;
 
 TupleVal_0.     TupleVal ::= "(" ")" ;
 -- TupleVal_1 rule is necessary to enforce comma while not allowing double comma
