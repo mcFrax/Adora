@@ -284,18 +284,17 @@ exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSigSem signature
     exeBody <-stmtBlockSem block
     let exeFunction args = mkExe $ \ke re0 mem0 -> do
-        let popCall k re' mem' = k re'{reReturn=reReturn re0} (popFrame mem')
+        let popCall k re mem = k re{reReturn=reReturn re0} (popFrame mem)
         let re1 = re0{reReturn=(\val -> popCall $ ke val)}
         let (fid, mem1) = allocFrame mem0
         let foldArg (name, exeArgPt) k = do
-                exec exeArgPt $ \pt re' mem' -> do
-                    k re' $ allocFrameVar fid name pt mem'
-        foldr foldArg (exec exeBody  $ const noReturn) (bindArgs args fnSgn defArgs) re1 mem1
+                exec exeArgPt $ \pt re mem -> do
+                    k re $ allocFrameVar fid name pt mem
+        let boundArgs = map (\(Just name, exe) -> (name, exe)) args -- TODO
+        let bodyCont re mem = (exec exeBody $ const noReturn) re $ mem{memFid=fid}
+        foldr foldArg bodyCont boundArgs re1 mem1
         -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
         where
-            --[(Maybe VarName, Exe Pointer)]
-            bindArgs :: [(Maybe VarName, Exe Pointer)] -> FunSgn -> (M.Map VarName (Exe Pointer)) -> [(VarName, Exe Pointer)]
-            bindArgs a _ _ = map (\(Just name, exe) -> (name, exe)) a -- TODO
             noReturn = error "No return in function"
 
     return $ RValue $ mkExe $ \ke -> ke $ ValFunction $ FunImpl {

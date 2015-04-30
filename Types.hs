@@ -123,7 +123,10 @@ mkExe exe = do
     Exe $ \ka -> exe $ \a re mem -> do
         _ <- evaluate a
         _ <- evaluate re
-        _ <- evaluate mem
+        _ <- evaluate $ memFid mem
+        _ <- evaluate $ memValues mem
+        _ <- evaluate $ memFrames mem
+--         putStrLn $ show mem
         ka a re mem
 
 runExe :: Exe a -> Cont
