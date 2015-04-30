@@ -54,10 +54,14 @@ allocVar k v mem = do
 allocVarFid :: Fid -> FrameKey -> Value -> Memory -> Memory
 allocVarFid fid k v mem = do
     let (pt, mem') = alloc v mem
+    allocFrameVar fid k pt mem'
+
+allocFrameVar :: Fid -> FrameKey -> Pointer -> Memory -> Memory
+allocFrameVar fid k pt mem = do
     let frames = memFrames mem
     let frame = frames M.! fid
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
-    mem'{memFrames=M.insert fid frame' frames}
+    mem{memFrames=M.insert fid frame' frames}
 
 assignVar :: FrameKey -> Value -> Memory -> Memory
 assignVar k v mem = do

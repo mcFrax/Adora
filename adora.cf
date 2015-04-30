@@ -6,6 +6,9 @@ Module_. Module ::= [Stmt] ;
 
 comment "#";
 
+layout toplevel ;
+layout ":" ;
+
 
 -- -- --
 -- Lexer - tokens
@@ -90,7 +93,7 @@ FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
 FunDef_Arg_Named. FunDef_Arg ::= TypeExpr LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= TypeExpr ;
+FunDef_Arg_Unnamed. FunDef_Arg ::= TypeExpr ; -- To chyba jest konflikt shift/reduce
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
@@ -126,8 +129,6 @@ VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
 -- Blocks
 
 StatementBlock_. StatementBlock ::= ":" "{" [Stmt] "}" ;
-
-layout ":" ;
 
 separator Stmt ";" ;
 

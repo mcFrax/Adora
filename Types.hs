@@ -41,13 +41,19 @@ data RunEnv = RunEnv {
 data ClassDesc = ClassDesc {
     className :: String,
     classProps :: M.Map VarName VarType,
-    classMths :: M.Map String FunDesc
+    classMths :: M.Map String FunSgn
 }
 
-data FunDesc = FunDesc {
+data FunSgn = FunSgn {
     mthRetType :: Cid,
-    mthArgs :: [(Maybe VarName, Cid, Maybe Pointer)]
-}
+    mthArgs :: [ArgSgn]
+} deriving (Eq, Ord)
+
+data ArgSgn = ArgSgn {
+    argName :: Maybe VarName,
+    argType :: Cid,
+    argHasDefault :: Bool
+} deriving (Eq, Ord)
 
 data StructDesc = StructDesc {
     structAttrs :: M.Map VarName Cid,
@@ -65,8 +71,8 @@ data PropImpl = PropImpl {
 }
 
 data FunImpl = FunImpl {
-    mthDesc :: FunDesc,
-    mthBody :: Exe Value
+    mthDesc :: FunSgn,
+    mthBody :: [(Maybe VarName, Exe Pointer)] -> Exe Value
 }
 
 instance Show FunImpl where

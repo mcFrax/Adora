@@ -190,13 +190,17 @@ stmtSem (Stmt_While condexpr block) = do
     exeCond <- exprSem condexpr
     exeBody <-stmtBlockSem block
     return $ fix $ \exeLoop k re -> do
+        let popRe re'' = re''{
+            reBreak=reBreak re,
+            reContinue=reContinue re
+        }
         let re' = re{
-            reBreak=(\_ -> k () re),
-            reContinue=(\_ -> exeLoop k re)
+            reBreak=(k ()).popRe,
+            reContinue=(exeLoop k).popRe
         }
         let k' = rValue exeCond $ \condVal _ -> do
             if isTruthy condVal then
-                exeBody (\_ _ -> exeLoop k re) re'
+                exeBody (\_ -> (exeLoop k).popRe) re'
             else
                 k () re
         k' re'
@@ -225,7 +229,6 @@ stmtSem (Stmt_Assert expr) = do
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 -- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
 -- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
--- Stmt_Assert.        Stmt ::= "assert" Expr ;
 stmtSem stmt = notYet stmt
 
 
@@ -276,7 +279,71 @@ exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
 -- Expr_Minus.     Expr8 ::= "-" Expr8 ;
 -- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
+exprSem (Expr_Lambda signature block) = do
+    (fnSgn, defArgs) <- fnSigSem signature
+    exeBody <-stmtBlockSem block
+    let exeFunction args ke re0 mem0 = do
+        let re1 = re0{reReturn=(\val -> popCall $ ke val)}
+        let (fid, mem1) = allocFrame mem0
+        let foldArg (name, exeArgPt) k = do
+                exeArgPt $ \pt re' mem' -> do
+                    k re' $ allocFrameVar fid name pt mem'
+        foldr foldArg (exeBody  $ const noReturn) (bindArgs args fnSgn defArgs) re1 mem1
+        -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
+        where
+            popCall k re' mem' = k re'{reReturn=reReturn re0} (popFrame mem')
+            --[(Maybe VarName, Exe Pointer)]
+            bindArgs :: [(Maybe VarName, Exe Pointer)] -> FunSgn -> (M.Map VarName (Exe Pointer)) -> [(VarName, Exe Pointer)]
+            bindArgs a _ _ = map (\(Just name, exe) -> (name, exe)) a -- TODO
+            noReturn = error "No return in function"
+
+    return $ RValue $ \ke -> ke $ ValFunction $ FunImpl {
+        mthDesc=fnSgn,
+        mthBody=exeFunction
+    }
+
 exprSem expr = notYet expr
+
+
+fnSigSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
+fnSigSem (FnSignature_ args _) = do
+    argTuples <- mapM argSem args
+    -- TODO: process ret type
+    -- OptResultType_None. OptResultType ::= ;
+    -- OptResultType_Some. OptResultType ::= "->" TypeExpr;
+    let funSgn = FunSgn {
+        mthRetType=undefined,
+        mthArgs=(map fst argTuples)
+    }
+    let defArgsMap = foldl argToMap M.empty argTuples
+    return (funSgn, defArgsMap)
+    where
+        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe Pointer))
+        argSem (FunDef_Arg_Named _ (LowerIdent (_, name)) defVal) = do
+            -- TODO: process type
+            (hasDef, defExe) <- case defVal of
+                MaybeDefaultVal_None -> return (False, Nothing)
+                MaybeDefaultVal_Some expr -> do
+                    exee <- exprSem expr
+                    let exe = \kpt -> rValue exee $ \val re mem -> do
+                        let (pt, mem') = alloc val mem
+                        kpt pt re mem'
+                    return (True, Just exe)
+            return $ (ArgSgn {
+                argName=Just name,
+                argType=undefined,
+                argHasDefault=hasDef
+            }, defExe)
+        argSem (FunDef_Arg_Unnamed _) = do
+            -- TODO: process type
+            return $ (ArgSgn {
+                argName=Nothing,
+                argType=undefined,
+                argHasDefault=False
+            }, Nothing)
+        argToMap m (_, Nothing) = m
+        argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
+        argToMap _ _ = error "argToMap incomplete"
 
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExeExpr

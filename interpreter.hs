@@ -6,6 +6,7 @@ import System.IO
 
 import ErrM
 import Paradora
+import Layoutadora
 
 import Semantic
 
@@ -21,7 +22,7 @@ main = do
             progName <- getProgName
             hPutStrLn stderr $ "Usage:\n    " ++ progName ++ " [FILE PATH]\n"
             exitFailure
-    case pModule $ myLexer $ code of
+    case pModule $ resolveLayout True . myLexer $ code of
         Bad errmsg -> do
             hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
             exitFailure
