@@ -71,8 +71,8 @@ data PropImpl = PropImpl {
 }
 
 data FunImpl = FunImpl {
-    mthDesc :: FunSgn,
-    mthBody :: [(Maybe VarName, Exe Pointer)] -> Exe Value
+    funDesc :: FunSgn,
+    funBody :: [(Maybe VarName, Exe Pointer)] -> Exe Value
 }
 
 instance Show FunImpl where

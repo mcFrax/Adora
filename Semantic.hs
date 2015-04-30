@@ -298,11 +298,30 @@ exprSem (Expr_Lambda signature block) = do
             noReturn = error "No return in function"
 
     return $ RValue $ \ke -> ke $ ValFunction $ FunImpl {
-        mthDesc=fnSgn,
-        mthBody=exeFunction
+        funDesc=fnSgn,
+        funBody=exeFunction
     }
 
+exprSem (Expr_FunCall expr args) = do
+    exeFn <- exprSem expr
+    argExes <- mapM argSem args
+    return $ RValue $ \ke -> do
+        rValue exeFn $ \(ValFunction fnImpl) -> funBody fnImpl argExes ke
+    where
+        argSem (FunCallArg_Positional argExpr) = do
+            exeArg <- exprSem argExpr
+            return (Nothing, exeExprToExePt exeArg)
+        argSem (FunCallArg_Keyword (LowerIdent (_, name)) argExpr) = do
+            exeArg <- exprSem argExpr
+            return (Just name, exeExprToExePt exeArg)
+
 exprSem expr = notYet expr
+
+exeExprToExePt :: ExeExpr -> (Exe Pointer)
+exeExprToExePt exeVal kpt = do
+    rValue exeVal $ \val re mem -> do
+        let (pt, mem') = alloc val mem
+        kpt pt re mem'
 
 
 fnSigSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
