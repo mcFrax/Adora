@@ -1,6 +1,7 @@
 module Types where
 
-import qualified Data.Map as M
+import Control.Exception
+import qualified Data.Map.Strict as M
 
 -- -- --
 -- Environment
@@ -113,15 +114,25 @@ data Value = ValNull
 
 type Cont = RunEnv -> Memory -> IO ()
 
-type Exe a = (a -> Cont) -> Cont
+newtype Exe a = Exe {
+    exec :: (a -> Cont) -> Cont
+}
+
+mkExe :: ((a -> Cont) -> Cont) -> Exe a
+mkExe exe = do
+    Exe $ \ka -> exe $ \a re mem -> do
+        _ <- evaluate a
+        _ <- evaluate re
+        _ <- evaluate mem
+        ka a re mem
 
 runExe :: Exe a -> Cont
-runExe exe = exe (\_ _ _ -> return ())
+runExe exe = exec exe (\_ _ _ -> return ())
 
-io :: IO a -> Exe a
+io :: IO a -> ((a -> Cont) -> Cont)
 io ioOp ka re mem = do
     iores <- ioOp
     ka iores re mem
 
 noop :: Exe ()
-noop = ($ ())
+noop = mkExe ($ ())

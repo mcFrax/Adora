@@ -1,7 +1,6 @@
 module Memory where
 
-import qualified Data.Map as M
-import Data.Maybe
+import qualified Data.Map.Strict as M
 
 import Types
 
@@ -32,7 +31,7 @@ allocFrame mem = do
     (fid, mem{memFrames=frames})
 
 popFrame :: Memory -> Memory
-popFrame mem = mem{memFid=fromJust $ frameParentId $ memFrame mem}
+popFrame mem = mem{memFid=(\(Just fid') -> fid') $ frameParentId $ memFrame mem}
 
 getVarPt :: FrameKey -> Memory -> Pointer
 getVarPt k mem = do
@@ -42,7 +41,7 @@ getVarPt k mem = do
         getVarPt' f = do
             case M.lookup k (frameContent f) of
                 Just pt -> pt
-                Nothing -> getVarPt' (frames M.! (fromJust $ frameParentId f))
+                Nothing -> getVarPt' (frames M.! ((\(Just fid') -> fid') $ frameParentId f))
 
 getVar :: FrameKey -> Memory -> Value
 getVar k mem = memGet mem $ getVarPt k mem

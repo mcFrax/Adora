@@ -7,7 +7,7 @@ import Control.Monad.Error.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 
 import System.Exit(exitFailure)
 import System.IO
@@ -133,53 +133,53 @@ stmtSeqSem stmts = do
             hexe <- stmtSem h
             modifiedEnv <- ask  -- TODO: env modification
             texe <- local (const modifiedEnv) $ stmtSeqSem' t
-            return $ hexe.const.texe
+            return $ mkExe $ (exec hexe).const.(exec texe)
 
 stmtSem :: Stmt -> Semantic (Exe ())
 stmtSem (Stmt_Decl _) = return noop
 
 stmtSem (Stmt_Expr expr) = do
     esem <- exprSem expr
-    return $ \k -> do
+    return $ mkExe $ \k -> do
         -- esem $ \_ -> k ()
-        rValue esem $ \v -> do
+        exec (rValue esem) $ \v -> do
             io (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) k
 
 stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
     eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
-    return $ \k -> do
-        rValue eexe $ \val re mem -> do
+    return $ mkExe $ \k -> do
+        exec (rValue eexe) $ \val re mem -> do
             k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
     eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
-    return $ \k -> do
-        rValue eexe $ \val re mem -> do
+    return $ mkExe $ \k -> do
+        exec (rValue eexe) $ \val re mem -> do
             k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
     lexe <- exprSem lexpr
     rexe <- exprSem rexpr
 --     typecheck  ...
-    return $ \k -> do
-        lValue lexe $ \pt -> do
-            rValue rexe $ \val re mem -> do
+    return $ mkExe $ \k -> do
+        exec (lValue lexe) $ \pt -> do
+            exec (rValue rexe) $ \val re mem -> do
                 k () re $ memSet mem pt val
 
 stmtSem (Stmt_If condexpr block elses) = do
     exeCond <- exprSem condexpr
     exeThen <-stmtBlockSem block
     exeElse <- elseSem elses
-    return $ \k ->
-        rValue exeCond $ \condVal ->
+    return $ mkExe $ \k ->
+        exec (rValue exeCond) $ \condVal ->
             if isTruthy condVal then
-                exeThen k
+                exec exeThen k
             else
-                exeElse k
+                exec exeElse k
     where
         elseSem ElseClauses_None = return noop
         elseSem (ElseClauses_Else elseBlock) = stmtBlockSem elseBlock
@@ -189,34 +189,35 @@ stmtSem (Stmt_If condexpr block elses) = do
 stmtSem (Stmt_While condexpr block) = do
     exeCond <- exprSem condexpr
     exeBody <-stmtBlockSem block
-    return $ fix $ \exeLoop k re -> do
-        let popRe re'' = re''{
-            reBreak=reBreak re,
-            reContinue=reContinue re
-        }
-        let re' = re{
-            reBreak=(k ()).popRe,
-            reContinue=(exeLoop k).popRe
-        }
-        let k' = rValue exeCond $ \condVal _ -> do
-            if isTruthy condVal then
-                exeBody (\_ -> (exeLoop k).popRe) re'
-            else
-                k () re
-        k' re'
+    return $ fix $ \exeLoop -> do
+        mkExe $ \k re -> do
+            let popRe re'' = re''{
+                reBreak=reBreak re,
+                reContinue=reContinue re
+            }
+            let re' = re{
+                reBreak=(k ()).popRe,
+                reContinue=(exec exeLoop k).popRe
+            }
+            let k' = exec (rValue exeCond) $ \condVal _ -> do
+                if isTruthy condVal then
+                    exec exeBody (\_ -> (exec exeLoop k).popRe) re'
+                else
+                    k () re
+            k' re'
     where
         fix :: (a -> a) -> a
         fix f = f $ fix f
 
-stmtSem Stmt_Break = return $ \_ re -> reBreak re re
-stmtSem Stmt_Continue = return $ \_ re -> reContinue re re
-stmtSem Stmt_Return = return $ \_ re -> reReturn re ValNull re
+stmtSem Stmt_Break = return $ mkExe $ \_ re -> reBreak re re
+stmtSem Stmt_Continue = return $ mkExe $ \_ re -> reContinue re re
+stmtSem Stmt_Return = return $ mkExe $ \_ re -> reReturn re ValNull re
 stmtSem (Stmt_ReturnValue expr) = do
     eexe <- exprSem expr
-    return $ \_ -> rValue eexe $ \val re -> reReturn re val re
+    return $ mkExe $ \_ -> exec (rValue eexe) $ \val re -> reReturn re val re
 stmtSem (Stmt_Assert expr) = do
     eexe <- exprSem expr
-    return $ \k -> rValue eexe $ \val -> do
+    return $ mkExe $ \k -> exec (rValue eexe) $ \val -> do
         if isTruthy val then
             k ()
         else
@@ -236,12 +237,12 @@ data ExeExpr = RValue (Exe Value)
              | LValue { lValue :: Exe Pointer }
 
 rValue :: ExeExpr -> (Exe Value)
-rValue (RValue e) ke = e ke
-rValue (LValue e) ke = e $ \pt re mem -> ke (memGet mem pt) re mem
+rValue (RValue e) = e
+rValue (LValue e) = mkExe $ \ke -> exec e $ \pt re mem -> ke (memGet mem pt) re mem
 
 exeExpr :: ExeExpr -> Exe ()
-exeExpr (RValue e) = e.const.noop
-exeExpr (LValue e) = e.const.noop
+exeExpr (RValue e) = mkExe $ (exec e).const.(exec noop)
+exeExpr (LValue e) = mkExe $ (exec e).const.(exec noop)
 
 isTruthy :: Value -> Bool
 isTruthy = valToBool
@@ -249,24 +250,24 @@ isTruthy = valToBool
 
 
 exprSem :: Expr -> Semantic ExeExpr
-exprSem (Expr_Char c) = return $ RValue ($ ValChar c)
+exprSem (Expr_Char c) = return $ RValue $ mkExe ($ ValChar c)
 -- exprSem (Expr_String c) _ =
 -- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
-exprSem (Expr_Int i) = return $ RValue ($ ValInt $ fromInteger i)
+exprSem (Expr_Int i) = return $ RValue $ mkExe ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (_, varName))) = do
     -- TODO: check env
-    return $ LValue $ \ke re mem -> ke (getVarPt varName mem) re mem
+    return $ LValue $ mkExe $ \ke re mem -> ke (getVarPt varName mem) re mem
 -- exprSem (Expr_Type _) _ = ???
 
 exprSem (Expr_RelOper exp1 RelOper_Eq exp2) = do
     -- TODO: laczenie operatorow,
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
-    return $ RValue $ \ke -> do
-        rValue e1exe $ \(ValInt v1) -> do
-            rValue e2exe $ \(ValInt v2) -> do
+    return $ RValue $ mkExe $ \ke -> do
+        exec (rValue e1exe) $ \(ValInt v1) -> do
+            exec (rValue e2exe) $ \(ValInt v2) -> do
                 ke (ValBool $ v1 == v2)
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
@@ -282,22 +283,22 @@ exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
 exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSigSem signature
     exeBody <-stmtBlockSem block
-    let exeFunction args ke re0 mem0 = do
+    let exeFunction args = mkExe $ \ke re0 mem0 -> do
+        let popCall k re' mem' = k re'{reReturn=reReturn re0} (popFrame mem')
         let re1 = re0{reReturn=(\val -> popCall $ ke val)}
         let (fid, mem1) = allocFrame mem0
         let foldArg (name, exeArgPt) k = do
-                exeArgPt $ \pt re' mem' -> do
+                exec exeArgPt $ \pt re' mem' -> do
                     k re' $ allocFrameVar fid name pt mem'
-        foldr foldArg (exeBody  $ const noReturn) (bindArgs args fnSgn defArgs) re1 mem1
+        foldr foldArg (exec exeBody  $ const noReturn) (bindArgs args fnSgn defArgs) re1 mem1
         -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
         where
-            popCall k re' mem' = k re'{reReturn=reReturn re0} (popFrame mem')
             --[(Maybe VarName, Exe Pointer)]
             bindArgs :: [(Maybe VarName, Exe Pointer)] -> FunSgn -> (M.Map VarName (Exe Pointer)) -> [(VarName, Exe Pointer)]
             bindArgs a _ _ = map (\(Just name, exe) -> (name, exe)) a -- TODO
             noReturn = error "No return in function"
 
-    return $ RValue $ \ke -> ke $ ValFunction $ FunImpl {
+    return $ RValue $ mkExe $ \ke -> ke $ ValFunction $ FunImpl {
         funDesc=fnSgn,
         funBody=exeFunction
     }
@@ -305,8 +306,8 @@ exprSem (Expr_Lambda signature block) = do
 exprSem (Expr_FunCall expr args) = do
     exeFn <- exprSem expr
     argExes <- mapM argSem args
-    return $ RValue $ \ke -> do
-        rValue exeFn $ \(ValFunction fnImpl) -> funBody fnImpl argExes ke
+    return $ RValue $ mkExe $ \ke -> do
+        exec (rValue exeFn) $ \(ValFunction fnImpl) -> exec (funBody fnImpl argExes) ke
     where
         argSem (FunCallArg_Positional argExpr) = do
             exeArg <- exprSem argExpr
@@ -318,10 +319,11 @@ exprSem (Expr_FunCall expr args) = do
 exprSem expr = notYet expr
 
 exeExprToExePt :: ExeExpr -> (Exe Pointer)
-exeExprToExePt exeVal kpt = do
-    rValue exeVal $ \val re mem -> do
-        let (pt, mem') = alloc val mem
-        kpt pt re mem'
+exeExprToExePt exeVal = do
+    mkExe $ \kpt -> do
+        exec (rValue exeVal) $ \val re mem -> do
+            let (pt, mem') = alloc val mem
+            kpt pt re mem'
 
 
 fnSigSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
@@ -344,7 +346,7 @@ fnSigSem (FnSignature_ args _) = do
                 MaybeDefaultVal_None -> return (False, Nothing)
                 MaybeDefaultVal_Some expr -> do
                     exee <- exprSem expr
-                    let exe = \kpt -> rValue exee $ \val re mem -> do
+                    let exe = mkExe $ \kpt -> exec (rValue exee) $ \val re mem -> do
                         let (pt, mem') = alloc val mem
                         kpt pt re mem'
                     return (True, Just exe)
@@ -369,9 +371,9 @@ intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExeExpr
 intBinopSem op exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
-    return $ RValue $ \ke -> do
-        rValue e1exe $ \(ValInt v1) -> do
-            rValue e2exe $ \(ValInt v2) -> do
+    return $ RValue $ mkExe $ \ke -> do
+        exec (rValue e1exe) $ \(ValInt v1) -> do
+            exec (rValue e2exe) $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
 
 
