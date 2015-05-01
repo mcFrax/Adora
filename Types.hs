@@ -63,13 +63,21 @@ data StructDesc = StructDesc {
 
 data Impl = Impl {
     implProps :: M.Map VarName PropImpl,
-    implMths :: M.Map VarName FunImpl
+    implMths :: M.Map VarName MthImpl
 }
 
 data PropImpl = PropImpl {
-    propGetter :: Maybe FunImpl,
-    propSetter :: Maybe FunImpl
+    propGetter :: Maybe MthImpl,
+    propSetter :: Maybe MthImpl
 }
+
+data MthImpl = MthImpl {
+    mthDesc :: FunSgn,
+    mthBody :: Pointer -> [(Maybe VarName, Exe Pointer)] -> Exe Value
+}
+
+bindMth :: MthImpl -> Pointer -> FunImpl
+bindMth (MthImpl d b) pt = FunImpl d (b pt)
 
 data FunImpl = FunImpl {
     funDesc :: FunSgn,
