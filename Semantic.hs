@@ -261,6 +261,12 @@ exprSem (Expr_Var (LowerIdent (_, varName))) = do
     return $ LValue $ mkExe $ \ke re mem -> ke (getVarPt varName mem) re mem
 -- exprSem (Expr_Type _) _ = ???
 
+exprSem (Expr_Not expr) = do
+    exee <- exprSem expr
+    return $ RValue $ mkExe $ \ke -> do
+        exec (rValue exee) $ \(ValBool bval) -> do
+            ke $ ValBool $ not bval
+
 exprSem (Expr_RelOper exp1 RelOper_Eq exp2) = do
     -- TODO: laczenie operatorow,
     e1exe <- exprSem exp1
