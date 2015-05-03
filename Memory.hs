@@ -62,6 +62,9 @@ allocFrameVar fid k pt mem = do
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
     mem{memFrames=M.insert fid frame' frames}
 
+assignFrameVar :: FrameKey -> Pointer -> Memory -> Memory
+assignFrameVar k pt mem = allocFrameVar (memFid mem) k pt mem
+
 assignVar :: FrameKey -> Value -> Memory -> Memory
 assignVar k v mem = do
     memSet mem (getVarPt k mem) v

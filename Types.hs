@@ -42,7 +42,7 @@ data RunEnv = RunEnv {
 data ClassDesc = ClassDesc {
     className :: String,
     classProps :: M.Map VarName VarType,
-    classMths :: M.Map String FunSgn
+    classMths :: M.Map VarName FunSgn
 }
 
 data FunSgn = FunSgn {
@@ -67,13 +67,13 @@ data Impl = Impl {
 }
 
 data PropImpl = PropImpl {
-    propGetter :: Maybe MthImpl,
-    propSetter :: Maybe MthImpl
+    propGetter :: Pointer -> Either (Exe Value) (Exe Pointer),
+    propSetter :: Pointer -> Pointer -> Exe ()  -- possibly undefined/error
 }
 
 data MthImpl = MthImpl {
     mthDesc :: FunSgn,
-    mthBody :: Pointer -> [(Maybe VarName, Exe Pointer)] -> Exe Value
+    mthBody :: Pointer -> [(Maybe VarName, Exe Pointer)] -> Either (Exe Value) (Exe Pointer)
 }
 
 bindMth :: MthImpl -> Pointer -> FunImpl
@@ -81,7 +81,7 @@ bindMth (MthImpl d b) pt = FunImpl d (b pt)
 
 data FunImpl = FunImpl {
     funDesc :: FunSgn,
-    funBody :: [(Maybe VarName, Exe Pointer)] -> Exe Value
+    funBody :: [(Maybe VarName, Exe Pointer)] -> Either (Exe Value) (Exe Pointer)
 }
 
 instance Show FunImpl where
@@ -115,6 +115,10 @@ data Value = ValNull
                 valObjStruct :: Sid,
                 valObjAttrs :: M.Map VarName Pointer
              } deriving Show
+
+objStruct :: Value -> RunEnv -> StructDesc
+objStruct objVal re = (reStructs re) M.! (valObjStruct objVal)
+
 
 -- -- --
 -- Execution

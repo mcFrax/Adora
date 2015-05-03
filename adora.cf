@@ -223,7 +223,7 @@ Expr_Is.        Expr9 ::= Expr10 "is" TypeExpr ;  -- isinstance
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
 Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
-Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent MaybeTemplateParams;
+Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
 
 MaybeTemplateParams_None.  MaybeTemplateParams ::= ;
