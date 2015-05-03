@@ -106,6 +106,9 @@ doubleCid = 0-3
 charCid :: Cid
 charCid = 0-4
 
+typeCid :: Cid
+typeCid = 0-5
+
 fooCid :: Cid
 fooCid = 123
 
@@ -393,6 +396,31 @@ exprSem (Expr_Lambda signature block) = do
         funBody=exeFunction
     }
 
+exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
+    let (TypeExpr_Name (UpperIdent (_, typeName))) = typeExpr
+    sid <- asks $ (M.! typeName).envStructs
+    struct <- gets $ (M.! sid).globStructs.sstGlob
+    let strCid = structCid struct
+    cid <- newCid
+    -- cid ==> ((??) -> <struct with cid=strCid>)
+    let exeCtor args = mkExePt $ \kpt re mem -> do
+        -- TODO: real constructor, common code with exprSem (Expr_Lambda ...)
+        let pt = nextPtr mem
+        let attrs = M.empty -- TODO
+        let mem' = memSet mem pt $ ValObject {
+            valObjStruct=sid,
+            valObjAttrs=attrs
+        }
+        kpt pt re mem'
+
+    return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl {
+        funDesc=FunSgn {
+            mthRetType=strCid,
+            mthArgs=[]
+        },
+        funBody=exeCtor
+    }
+
 exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
     cid <- newCid
@@ -414,8 +442,8 @@ exprSem (Expr_FunCall expr args) = do
     exeFn <- exprSem expr
     argExes <- mapM argSem args
     cid <- newCid
-    return $ RValue cid $ mkExePt $ \ke -> do
-        rValue exeFn $ \(ValFunction fnImpl) -> execPt (funBody fnImpl argExes) ke
+    return $ RValue cid $ mkExePt $ \kpt -> do
+        rValue exeFn $ \(ValFunction fnImpl) -> execPt (funBody fnImpl argExes) kpt
     where
         argSem (FunCallArg_Positional argExpr) = do
             exeArg <- exprSem argExpr

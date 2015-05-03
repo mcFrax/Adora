@@ -57,6 +57,7 @@ data ArgSgn = ArgSgn {
 } deriving (Eq, Ord)
 
 data StructDesc = StructDesc {
+    structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl
 }

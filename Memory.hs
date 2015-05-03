@@ -16,6 +16,12 @@ memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
 
+nextPtr :: Memory -> Pointer
+nextPtr mem = do
+    if M.null vals then 0 else (fst $ M.findMax vals) + 1
+    where
+        vals = memValues mem
+
 alloc :: Value -> Memory -> (Pointer, Memory)
 alloc v mem = do
     let (pt, values) = insertNext 0 v $ memValues mem
