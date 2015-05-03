@@ -109,8 +109,17 @@ charCid = 0-4
 typeCid :: Cid
 typeCid = 0-5
 
+voidCid :: Cid
+voidCid = 0-100
+
 fooCid :: Cid
 fooCid = 123
+
+mkMth :: (Pointer -> FunImpl) -> PropImpl
+mkMth mth = PropImpl {
+    propGetter=(\pt -> mkExeV $ ($ ValFunction $ mth pt)),
+    propSetter=(error "Methods are read-only properties")
+}
 
 moduleSem :: Module -> Either SemanticError (IO ())
 moduleSem (Module_ stmts) = do
@@ -126,7 +135,7 @@ moduleSem (Module_ stmts) = do
         initSemState = SemState {
             sstGlob=GlobEnv {
                 globClasses=M.fromList [
-                    (100, ClassDesc {
+                    (fooCid, ClassDesc {
                         className="Foo",
                         classProps=M.fromList [
                             ("foo", VarType {
@@ -148,7 +157,27 @@ moduleSem (Module_ stmts) = do
                         ]
                     })
                 ],
-                globStructs=M.empty
+                globStructs=M.fromList [
+                    (fooCid, StructDesc {
+                        structCid=fooCid,
+                        structAttrs=M.empty,  -- :: M.Map VarName Cid,
+                        structClasses=M.fromList [  -- :: M.Map Cid Impl
+                            (fooCid, M.fromList [  -- :: M.Map VarName PropImpl,
+                                ("foo", PropImpl {
+                                    propGetter=(\pt -> mkExeV $ \ke -> ke $ ValInt 666),
+                                    propSetter=(\pt vpt -> mkExe $ \k re mem -> (hPutStrLn stderr $ (++) "foo setter: " $ show $ memGet mem vpt) >> (k () re mem))
+                                }),
+                                ("fooThat", mkMth $ \pt -> FunImpl {
+                                    funDesc=FunSgn {
+                                        mthRetType=intCid,
+                                        mthArgs=[]
+                                    },
+                                    funBody=(\args -> mkExeV $ \ke re mem -> (hPutStrLn stderr $ (++) "fooThat: " $ show $ map fst args) >> (ke (ValInt 555) re mem))
+                                })
+                            ])
+                        ]
+                    })
+                ]
             },
             sstStructTmpls=(M.empty, M.empty),
             sstClassTmpls=(M.empty, M.empty),
@@ -160,8 +189,12 @@ moduleSem (Module_ stmts) = do
         outerEnv = LocEnv {
             envSuper=Nothing,
             envVars=M.fromList [],
-            envClasses=M.fromList [],
-            envStructs=M.fromList [],
+            envClasses=M.fromList [
+                ("Foo", fooCid)
+            ],
+            envStructs=M.fromList [
+                ("Foo", fooCid)
+            ],
             envExpectedReturnType=Nothing
         }
 
@@ -398,8 +431,8 @@ exprSem (Expr_Lambda signature block) = do
 
 exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
     let (TypeExpr_Name (UpperIdent (_, typeName))) = typeExpr
-    sid <- asks $ (M.! typeName).envStructs
-    struct <- gets $ (M.! sid).globStructs.sstGlob
+    sid <- asks $ (!!! typeName).envStructs
+    struct <- gets $ (!!! sid).globStructs.sstGlob
     let strCid = structCid struct
     cid <- newCid
     -- cid ==> ((??) -> <struct with cid=strCid>)
@@ -424,10 +457,11 @@ exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
 exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
     cid <- newCid
-    let getProp objPt re mem = do
+    let objCid = fooCid -- (expCid exee)
+    let getImpl objPt re mem = do
         let struct = objStruct (memGet mem objPt) re
-        let impl = (structClasses struct) M.! (expCid exee)
-        (implProps impl) M.! propName
+        (structClasses struct) !!! objCid
+    let getProp objPt re mem = (getImpl objPt re mem) !!! propName
     let exeGet = mkExePt $ \kpt -> do
         rValuePt exee $ \objPt re mem -> do
             let prop = getProp objPt re mem

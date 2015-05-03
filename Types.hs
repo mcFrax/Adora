@@ -11,7 +11,7 @@ type VarName = String
 data VarType = VarType {
     varMutable :: Bool,
     varClass :: Cid
-}
+} deriving Show
 
 type Cid = Int -- class id
 type Sid = Int -- struct id
@@ -25,12 +25,12 @@ data LocEnv = LocEnv {
     envClasses :: M.Map VarName Cid,
     envStructs :: M.Map VarName Sid,
     envExpectedReturnType :: Maybe Cid
-}
+} deriving Show
 
 data GlobEnv = GlobEnv {
     globClasses :: CidMap,
     globStructs :: SidMap
-}
+} deriving Show
 
 data RunEnv = RunEnv {
     reStructs :: SidMap,
@@ -43,42 +43,34 @@ data ClassDesc = ClassDesc {
     className :: String,
     classProps :: M.Map VarName VarType,
     classMths :: M.Map VarName FunSgn
-}
+} deriving Show
 
 data FunSgn = FunSgn {
     mthRetType :: Cid,
     mthArgs :: [ArgSgn]
-} deriving (Eq, Ord)
+} deriving (Eq, Ord, Show)
 
 data ArgSgn = ArgSgn {
     argName :: Maybe VarName,
     argType :: Cid,
     argHasDefault :: Bool
-} deriving (Eq, Ord)
+} deriving (Eq, Ord, Show)
 
 data StructDesc = StructDesc {
     structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl
-}
+} deriving Show
 
-data Impl = Impl {
-    implProps :: M.Map VarName PropImpl,
-    implMths :: M.Map VarName MthImpl
-}
+type Impl = M.Map VarName PropImpl  -- both props and mths
 
 data PropImpl = PropImpl {
     propGetter :: Pointer -> Either (Exe Value) (Exe Pointer),
     propSetter :: Pointer -> Pointer -> Exe ()  -- possibly undefined/error
 }
 
-data MthImpl = MthImpl {
-    mthDesc :: FunSgn,
-    mthBody :: Pointer -> [(Maybe VarName, Exe Pointer)] -> Either (Exe Value) (Exe Pointer)
-}
-
-bindMth :: MthImpl -> Pointer -> FunImpl
-bindMth (MthImpl d b) pt = FunImpl d (b pt)
+instance Show PropImpl where
+    show _ = "<PropImpl>"
 
 data FunImpl = FunImpl {
     funDesc :: FunSgn,
