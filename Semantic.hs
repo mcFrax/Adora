@@ -8,6 +8,7 @@ import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import System.Exit(exitFailure)
 import System.IO
@@ -410,24 +411,46 @@ exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSigSem signature
     exeBody <-stmtBlockSem block
     cid <- newCid
-    let exeFunction args = mkExeV $ \ke re0 mem0 -> do
-        let popCall k re mem = k re{reReturn=reReturn re0} (popFrame mem)
+    let exeFunction closureFid argTuples = mkExeV $ \ke re0 mem0 -> do
+        let callerFid = memFid mem0
+        let popCall k re mem = k re{reReturn=reReturn re0} (setFid callerFid mem)
         let re1 = re0{reReturn=(\val -> popCall $ ke val)}
-        let (fid, mem1) = allocFrame mem0
-        let foldArg (name, exeArgPt) k = do
-                exec exeArgPt $ \pt re mem -> do
-                    k re $ allocFrameVar fid name pt mem
-        let boundArgs = map (\(Just name, exe) -> (name, exe)) args -- TODO
-        let bodyCont re mem = (exec exeBody $ const noReturn) re $ mem{memFid=fid}
-        foldr foldArg bodyCont boundArgs re1 mem1
+        let (fid, mem1) = allocFrame closureFid mem0
+        let exeArg maybeName exeArgPt k = do
+            case maybeName of
+                Just name -> do
+                    exec exeArgPt $ \pt re mem -> do
+                        k re $ allocFrameVar fid name pt mem
+                Nothing -> exec exeArgPt $ const k
+        let foldArg (maybeName, exeArgPt) (k, argSgns) = do
+            (exeArg maybeName' exeArgPt k, argSgns')
+            where
+                (maybeName', argSgns') = do
+                    case maybeName of
+                        Just _ -> do
+                            (maybeName, filter ((/= maybeName).argName) argSgns)
+                        Nothing -> do
+                            (argName $ head argSgns, tail argSgns)
+        let callCont = do
+                foldr foldDef bodyCont defSgns
+                where
+                    foldDef (ArgSgn{argName=(Just name)}) k' = do
+                        exec (defArgs M.! name) $ const k'
+                    foldDef (ArgSgn{argName=Nothing}) k' = k'
+            bodyCont re mem = (exec exeBody $ const noReturn) re $ mem{memFid=fid}
+            (k, defSgns) = do
+                foldr foldArg (callCont, mthArgs fnSgn) argTuples
+            in k re1 mem1
         -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
-        where
-            noReturn = error "No return in function"
 
-    return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl {
+    let lambdaVal closureFid = ValFunction $ FunImpl {
         funDesc=fnSgn,
-        funBody=exeFunction
+        funBody=exeFunction closureFid
     }
+    return $ RValue cid $ mkExeV $ \ke re mem -> do
+        ke (lambdaVal $ memFid mem) re mem
+    where
+        noReturn = error "No return in function"
 
 exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
     let (TypeExpr_Name (UpperIdent (_, typeName))) = typeExpr
@@ -474,10 +497,15 @@ exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
 
 exprSem (Expr_FunCall expr args) = do
     exeFn <- exprSem expr
-    argExes <- mapM argSem args
+    argTuples <- mapM argSem args
+    kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argTuples
+    let kwargsSet = foldl (\s (n, _) -> S.insert n s) S.empty kwargs
+    when ((S.size kwargsSet) /= (length kwargs)) $ do
+        throwError $ SemanticError "Kwarg names not unique"
     cid <- newCid
     return $ RValue cid $ mkExePt $ \kpt -> do
-        rValue exeFn $ \(ValFunction fnImpl) -> execPt (funBody fnImpl argExes) kpt
+        rValue exeFn $ \(ValFunction fnImpl) -> do
+            execPt (funBody fnImpl argTuples) kpt
     where
         argSem (FunCallArg_Positional argExpr) = do
             exeArg <- exprSem argExpr
@@ -485,6 +513,10 @@ exprSem (Expr_FunCall expr args) = do
         argSem (FunCallArg_Keyword (LowerIdent (_, name)) argExpr) = do
             exeArg <- exprSem argExpr
             return (Just name, mkExe $ rValuePt exeArg)
+        fstIsNothing = (== Nothing).fst
+        unJustKwarg (Just name, exe) = return (name, exe)
+        unJustKwarg (Nothing, _) = do
+            throwError $ SemanticError "Positional arg after kwargs"
 
 exprSem expr = notYet expr
 
@@ -495,6 +527,7 @@ fnSigSem (FnSignature_ args _) = do
     -- TODO: process ret type
     -- OptResultType_None. OptResultType ::= ;
     -- OptResultType_Some. OptResultType ::= "->" TypeExpr;
+    -- TODO: check that args have unique names
     let funSgn = FunSgn {
         mthRetType=undefined,
         mthArgs=(map fst argTuples)

@@ -238,18 +238,12 @@ Expr_Char.      Expr11 ::= Char ;
 Expr_String.    Expr11 ::= String ;
 Expr_Double.    Expr11 ::= Double ;
 Expr_Int.       Expr11 ::= Integer ;
-Expr_Tuple.     Expr11 ::= TupleVal ;
-Expr_Array.     Expr11 ::= BnfcSucksListVal ;
+Expr_Tuple.     Expr11 ::= "(" Expr "," [Expr] ")" ;
+Expr_Array.     Expr11 ::= LstVal ;
 Expr_Var.       Expr11 ::= LowerIdent ;
 Expr_Type.      Expr11 ::= "[" TypeExpr "]" ;
 
-TupleVal_0.     TupleVal ::= "(" ")" ;
--- TupleVal_1 rule is necessary to enforce comma while not allowing double comma
-TupleVal_1.     TupleVal ::= "(" Expr "," ")" ;
-TupleVal_More.  TupleVal ::= "(" Expr "," [Expr] MaybeComma ")" ;
-
--- Using just `ListVal` doesn't work, because bnfc sucks (some kind of bug - conflict with built-in type names)
-BnfcSucksListVal_0.      BnfcSucksListVal ::= "[" "]" ;
-BnfcSucksListVal_More.   BnfcSucksListVal ::= "[" [Expr] MaybeComma "]" ;
+LstVal_None.   LstVal ::= "[" "]" ;
+LstVal_Some.   LstVal ::= "[" [Expr] "]" ;
 
 _.              Expr12 ::= "(" Expr ")" ;

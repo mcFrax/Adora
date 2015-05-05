@@ -35,10 +35,10 @@ alloc v mem = do
     let (pt, values) = insertNext 0 v $ memValues mem
     (pt, mem{memValues=values})
 
-allocFrame :: Memory -> (Fid, Memory)
-allocFrame mem = do
+allocFrame :: Fid -> Memory -> (Fid, Memory)
+allocFrame closureFid mem = do
     let frame = Frame{
-        frameParentId=Just $ memFid mem,
+        frameParentId=Just closureFid,
         frameContent=M.empty
     }
     let (fid, frames) = insertNext 0 frame $ memFrames mem
