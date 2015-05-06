@@ -413,8 +413,8 @@ exprSem (Expr_Lambda signature block) = do
     cid <- newCid
     let exeFunction closureFid argTuples = do
         mkExeV $ \ke re0 mem0 -> let
-            popCall k re mem = k re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
-            re1 = re0{reReturn=(\val -> popCall $ ke val)}
+            doReturn val re mem = ke val re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
+            re1 = re0{reReturn=doReturn}
             (fid, mem1) = allocFrame closureFid mem0
 
             exeArgs :: Exe ()
@@ -451,7 +451,7 @@ exprSem (Expr_Lambda signature block) = do
             bodyCont re mem = do
                 hPutStrLn stderr $ show $ length defSgns
                 hPutStrLn stderr $ show $ M.size defArgs
-                (exec exeBody $ const noReturn) re $ mem{memFid=fid}
+                (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
 
             in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
             -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
@@ -462,8 +462,6 @@ exprSem (Expr_Lambda signature block) = do
     }
     return $ RValue cid $ mkExeV $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
-    where
-        noReturn = error "No return in function"
 
 exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
     let (TypeExpr_Name (UpperIdent (_, typeName))) = typeExpr
