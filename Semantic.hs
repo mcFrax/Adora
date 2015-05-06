@@ -236,19 +236,19 @@ data ExprSem = RValue {
                 setLValue :: Pointer -> Exe ()
             }
 
-rValue :: ExprSem -> ((Value -> Cont) -> Cont)
+rValue :: ExprSem -> SemiCont Value
 rValue = execV.expRValue
 
-rValuePt :: ExprSem -> ((Pointer -> Cont) -> Cont)
+rValuePt :: ExprSem -> SemiCont Pointer
 rValuePt = execPt.expRValue
 
-execV :: Either (Exe Value) (Exe Pointer) -> ((Value -> Cont) -> Cont)
+execV :: Either (Exe Value) (Exe Pointer) -> SemiCont Value
 execV (Left exeVal) = exec exeVal
 execV (Right exePt) = \ke -> do
     exec exePt $ \pt re mem -> do
         ke (memGet mem pt) re mem
 
-execPt :: Either (Exe Value) (Exe Pointer) -> ((Pointer -> Cont) -> Cont)
+execPt :: Either (Exe Value) (Exe Pointer) -> SemiCont Pointer
 execPt (Left exeVal) = \kpt -> do
     exec exeVal $ \val re mem -> do
         let (pt, mem') = alloc val mem
@@ -259,10 +259,10 @@ execPt (Right exePt) = exec exePt
 -- exeExpr (RValue _ e) = mkExe $ (exec e).const.(exec noop)
 -- exeExpr (LValue _ e _) = mkExe $ (exec e).const.(exec noop)
 
-mkExeV :: ((Value -> Cont) -> Cont) -> Either (Exe Value) (Exe Pointer)
+mkExeV :: SemiCont Value -> Either (Exe Value) (Exe Pointer)
 mkExeV = (Left).mkExe
 
-mkExePt :: ((Pointer -> Cont) -> Cont) -> Either (Exe Value) (Exe Pointer)
+mkExePt :: SemiCont Pointer -> Either (Exe Value) (Exe Pointer)
 mkExePt = (Right).mkExe
 
 isTruthy :: Value -> Bool
@@ -377,8 +377,8 @@ exprSem (Expr_Int i) = return $ RValue intCid $ mkExeV ($ ValInt $ fromInteger i
 exprSem (Expr_Var (LowerIdent (_, varName))) = do
     -- TODO: check env
     let cid = intCid -- TODO TODO TODO
-    let exeGet = mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
-    let exeSet pt = mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
+        exeGet = mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
+        exeSet pt = mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
     return $ LValue cid exeGet exeSet
 -- exprSem (Expr_Type _) _ = ???
 
@@ -491,20 +491,20 @@ exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
 exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
     cid <- newCid
-    let objCid = fooCid -- (expCid exee)
-    let getImpl objPt re mem = do
-        let struct = objStruct (memGet mem objPt) re
-        (structClasses struct) !!! objCid
-    let getProp objPt re mem = (getImpl objPt re mem) !!! propName
-    let exeGet = mkExePt $ \kpt -> do
-        rValuePt exee $ \objPt re mem -> do
-            let prop = getProp objPt re mem
-            execPt (propGetter prop objPt) kpt re mem
-    let exeSet valPt = mkExe $ \k -> do
-        rValuePt exee $ \objPt re mem -> do
-            let prop = getProp objPt re mem
-            exec (propSetter prop objPt valPt) k re mem
-    return $ LValue cid exeGet exeSet
+    let
+        objCid = fooCid -- (expCid exee)
+        exeGet = mkExePt $ exeProp $ \prop objPt -> do
+            execPt $ propGetter prop objPt
+        exeSet valPt = mkExe $ exeProp $ \prop objPt -> do
+            exec $ propSetter prop objPt valPt
+        exeProp :: (PropImpl -> Pointer -> SemiCont a) -> SemiCont a
+        exeProp handler k_ =  do
+            rValuePt exee $ \objPt re mem -> let
+                struct = objStruct (memGet mem objPt) re
+                impl = (structClasses struct) !!! objCid
+                prop = impl !!! propName
+                in (handler prop objPt) k_ re mem
+        in return $ LValue cid exeGet exeSet
 
 exprSem (Expr_FunCall expr args) = do
     exeFn <- exprSem expr

@@ -118,12 +118,13 @@ objStruct objVal re = (reStructs re) M.! (valObjStruct objVal)
 -- -- --
 
 type Cont = RunEnv -> Memory -> IO ()
+type SemiCont a = (a -> Cont) -> Cont
 
 newtype Exe a = Exe {
-    exec :: (a -> Cont) -> Cont
+    exec :: SemiCont a
 }
 
-mkExe :: ((a -> Cont) -> Cont) -> Exe a
+mkExe :: SemiCont a -> Exe a
 mkExe exe = do
     Exe $ \ka -> exe $ \a re mem -> do
         _ <- evaluate a
@@ -137,7 +138,7 @@ mkExe exe = do
 runExe :: Exe a -> Cont
 runExe exe = exec exe (\_ _ _ -> return ())
 
-io :: IO a -> ((a -> Cont) -> Cont)
+io :: IO a -> SemiCont a
 io ioOp ka re mem = do
     iores <- ioOp
     ka iores re mem
