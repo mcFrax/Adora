@@ -21,6 +21,9 @@ memGet mem pt = (memValues mem) !!! pt
 memSet :: Memory -> Pointer -> Value -> Memory
 memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
 
+memAdjust :: Memory -> Pointer -> (Value -> Value) -> Memory
+memAdjust mem pt f = mem{memValues=M.adjust f pt (memValues mem)}
+
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
 

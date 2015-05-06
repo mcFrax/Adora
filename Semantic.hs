@@ -449,8 +449,9 @@ exprSem (Expr_Lambda signature block) = do
 
             bodyCont :: Cont
             bodyCont re mem = do
-                hPutStrLn stderr $ show $ length defSgns
-                hPutStrLn stderr $ show $ M.size defArgs
+                hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
+                                    (show $ length defSgns) ++ ", " ++
+                                    (show $ M.size defArgs))
                 (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
 
             in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
@@ -487,6 +488,25 @@ exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
         },
         funBody=exeCtor
     }
+
+exprSem (Expr_Field expr (LowerIdent (_, attrName))) = do
+    exee <- exprSem expr
+    let cid = intCid -- cid <- newCid
+    let
+        objCid = fooCid -- (expCid exee)
+        exeGet = mkExePt $ exeAttr $ \objPt attrs kpt re mem -> do
+            kpt (attrs M.! attrName) re mem
+        exeSet valPt = mkExe $ exeAttr $ \objPt attrs k re mem -> let
+            mem' = memAdjust mem objPt $ \objVal -> objVal{
+                valObjAttrs=(M.insert attrName valPt attrs)
+            }
+            in k () re mem'
+        exeAttr :: (Pointer -> M.Map VarName Pointer -> SemiCont a) -> SemiCont a
+        exeAttr handler k_ =  do
+            rValuePt exee $ \objPt re mem -> let
+                attrs = valObjAttrs $ memGet mem objPt
+                in handler objPt attrs k_ re mem
+        in return $ LValue cid exeGet exeSet
 
 exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
