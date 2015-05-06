@@ -408,40 +408,53 @@ exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
 -- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
 exprSem (Expr_Lambda signature block) = do
-    (fnSgn, defArgs) <- fnSigSem signature
+    (fnSgn, defArgs) <- fnSignatureSem signature
     exeBody <-stmtBlockSem block
     cid <- newCid
-    let exeFunction closureFid argTuples = mkExeV $ \ke re0 mem0 -> do
-        let callerFid = memFid mem0
-        let popCall k re mem = k re{reReturn=reReturn re0} (setFid callerFid mem)
-        let re1 = re0{reReturn=(\val -> popCall $ ke val)}
-        let (fid, mem1) = allocFrame closureFid mem0
-        let exeArg maybeName exeArgPt k = do
-            case maybeName of
-                Just name -> do
-                    exec exeArgPt $ \pt re mem -> do
-                        k re $ allocFrameVar fid name pt mem
-                Nothing -> exec exeArgPt $ const k
-        let foldArg (maybeName, exeArgPt) (k, argSgns) = do
-            (exeArg maybeName' exeArgPt k, argSgns')
-            where
-                (maybeName', argSgns') = do
-                    case maybeName of
-                        Just _ -> do
-                            (maybeName, filter ((/= maybeName).argName) argSgns)
-                        Nothing -> do
-                            (argName $ head argSgns, tail argSgns)
-        let callCont = do
-                foldr foldDef bodyCont defSgns
+    let exeFunction closureFid argTuples = do
+        mkExeV $ \ke re0 mem0 -> let
+            popCall k re mem = k re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
+            re1 = re0{reReturn=(\val -> popCall $ ke val)}
+            (fid, mem1) = allocFrame closureFid mem0
+
+            exeArgs :: Exe ()
+            (exeArgs, defSgns) = foldl foldArg (noop, mthArgs fnSgn) argTuples
+
+            foldArg (exe, argSgns) (maybeName, exeArgPt) = do
+                (exe', argSgns')
                 where
-                    foldDef (ArgSgn{argName=(Just name)}) k' = do
-                        exec (defArgs M.! name) $ const k'
-                    foldDef (ArgSgn{argName=Nothing}) k' = k'
-            bodyCont re mem = (exec exeBody $ const noReturn) re $ mem{memFid=fid}
-            (k, defSgns) = do
-                foldr foldArg (callCont, mthArgs fnSgn) argTuples
-            in k re1 mem1
-        -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
+                    exe' = mkExe $ \ku -> do
+                        exec exe $ \_ -> do
+                            case maybeName' of
+                                Just name -> do
+                                    exec exeArgPt $ \pt re mem -> do
+                                        ku () re $ allocFrameVar fid name pt mem
+                                Nothing -> exec exeArgPt $ const $ ku ()
+                    (maybeName', argSgns') = do
+                        case maybeName of
+                            Just _ -> (maybeName,
+                                       filter ((/= maybeName).argName) argSgns)
+                            Nothing -> (argName $ head argSgns,
+                                        tail argSgns)
+            exeDefArgs :: Exe ()
+            exeDefArgs = do
+                foldl foldDef noop defSgns
+                where
+                    foldDef exe (ArgSgn{argName=(Just name)}) = do
+                        mkExe $ \ku -> do
+                            exec exe $ \_ -> do
+                                exec (defArgs M.! name) $ \pt re mem -> do
+                                    ku () re $ allocFrameVar fid name pt mem
+                    foldDef exe (ArgSgn{argName=Nothing}) = exe
+
+            bodyCont :: Cont
+            bodyCont re mem = do
+                hPutStrLn stderr $ show $ length defSgns
+                hPutStrLn stderr $ show $ M.size defArgs
+                (exec exeBody $ const noReturn) re $ mem{memFid=fid}
+
+            in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
+            -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
 
     let lambdaVal closureFid = ValFunction $ FunImpl {
         funDesc=fnSgn,
@@ -521,8 +534,8 @@ exprSem (Expr_FunCall expr args) = do
 exprSem expr = notYet expr
 
 
-fnSigSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
-fnSigSem (FnSignature_ args _) = do
+fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
+fnSignatureSem (FnSignature_ args _) = do
     argTuples <- mapM argSem args
     -- TODO: process ret type
     -- OptResultType_None. OptResultType ::= ;
@@ -560,7 +573,7 @@ fnSigSem (FnSignature_ args _) = do
             }, Nothing)
         argToMap m (_, Nothing) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
-        argToMap _ _ = error "argToMap incomplete"
+        argToMap _ _ = error "argToMap: default value for unnamed argument"
 
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExprSem
