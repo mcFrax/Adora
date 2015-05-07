@@ -1,3 +1,35 @@
+==============
+== Aktualne ==
+==============
+
+- Tablice
+- Stringi
+- Krotki?
+- IO
+- Dodać placeholder '_' w let (...) = ...
+- Poprawki składni: konflikty shift/reduce, połączenie Expr i TypeExpr
+- Semantyka TypeExpr
+- Semantyka deklaracji
+- Dopracowanie semantyki bloków - co, kiedy, gdzie są ramki a gdzie nie
+- Inicjalizacja zmiennych
+- Typechecking
+- Templaty klas
+- Templaty struktur
+- Pętla for
+- Jak przechowywać statyczną informację o _strukturze_? Tzn. skąd brać informację
+    o legalnych do użycia atrybutach? Może jednak powinny być w klasie, albo właśnie
+    być properties, tylko że z autostoragem? To co prawda oznacza, że podstawowy ficzer
+    systemu typów znika ;)
+- Refactoring - wcięcia, do/let
+- Refactoring - spójne nazwy (ke -> kv itp.)
+- Refactoring ogólny?
+
+
+=== === ===
+Stare do składni:
+---
+
+
 X wyrażenie typowane
 variant definitions
 ustalenie czegoś w kwestii zarządzania pamięcią - co jest trzymane jako wskaźnik, a co bezpośrednio
@@ -9,15 +41,6 @@ deklaracje/definicje funkcji? (nie metod)
 deklaracje funkcji lambda?
 dopisanie składni pętli? chyba nie ma fora aktualnie?
 typy generyczne? jak to z nimi miało być?
-
-----
-Problemy
-
-Shift/reduce przy "Type.coś" (czemu, kurczę?)
-Dodać placeholder '_' w let (...) = ...
-
-----
-
 
 
 Ciekawe, gdzie wsadziłem notatki papierowe. Chyba byłoby mądrze, gdybym miał je ze sobą :P

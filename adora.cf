@@ -214,7 +214,7 @@ Expr_Mod.       Expr7 ::= Expr7 "%" Expr8 ;
 
 _.              Expr8 ::= Expr9 ;
 Expr_Minus.     Expr8 ::= "-" Expr8 ;
-Expr_Plus.      Expr8 ::= "+" Expr8 ;
+-- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
 _.              Expr9 ::= Expr10 ;
 Expr_Cast.      Expr9 ::= Expr10 "as" TypeExpr ;

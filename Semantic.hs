@@ -218,10 +218,10 @@ stmtSeqSem stmts = do
     hoistedEnv <- return outerEnv  -- TODO: hoisting
     local (const hoistedEnv) $ stmtSeqSem' stmts
     where
-        stmtSeqSem' [] = return noop
+        stmtSeqSem' [] = return noop -- TODO: check return
         stmtSeqSem' (h:t) = do
             hexe <- stmtSem h
-            modifiedEnv <- ask  -- TODO: env modification
+            modifiedEnv <- ask  -- TODO: env modification (including var initialization)
             texe <- local (const modifiedEnv) $ stmtSeqSem' t
             return $ mkExe $ (exec hexe).const.(exec texe)
 
@@ -403,9 +403,12 @@ exprSem (Expr_Mul exp1 exp2) = intBinopSem (*) exp1 exp2
 -- exprSem (Expr_Div exp1 exp2) = ??? / exp1 exp2
 exprSem (Expr_IntDiv exp1 exp2) = intBinopSem div exp1 exp2
 exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
-
--- Expr_Minus.     Expr8 ::= "-" Expr8 ;
--- Expr_Plus.      Expr8 ::= "+" Expr8 ;
+exprSem (Expr_Minus expr) = do
+    exee <- exprSem expr
+    cid <- newCid
+    return $ RValue cid $ mkExeV $ \ke -> do
+        rValue exee $ \(ValInt val) re mem -> do
+            ke (ValInt $ 0 - val) re mem
 
 exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSignatureSem signature
