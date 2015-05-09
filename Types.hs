@@ -15,6 +15,8 @@ data VarType = VarType {
 
 type Cid = Int -- class id
 type Sid = Int -- struct id
+type CTid = Int
+type STid = Int
 
 type CidMap = M.Map Cid ClassDesc
 type SidMap = M.Map Sid StructDesc

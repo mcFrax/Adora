@@ -22,8 +22,8 @@ import Types
 
 data SemState = SemState {
     sstGlob :: GlobEnv,
-    sstStructTmpls :: TemplateMap Sid StructDesc,
-    sstClassTmpls :: TemplateMap Cid ClassDesc,
+    sstStructTmpls :: TemplateMap STid StructDesc,
+    sstClassTmpls :: TemplateMap CTid ClassDesc,
     sstFunClasses :: M.Map () Cid,
     sstNextCid :: Cid,
     sstClassRules :: [ClassRule]
@@ -42,11 +42,11 @@ newCid = do
     put stt{sstNextCid=cid+1}
     return cid
 
-data Template a = Tmpl a
+data Template a = Tmpl0 a
                 | TmplS Int (Sid -> Template a)
                 | TmplC Int (Cid -> Template a)
 
-type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] a)
+type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] b)
 
 type StructTemplate = Template StructDesc
 type ClassTemplate = Template ClassDesc
@@ -226,7 +226,6 @@ stmtSeqSem stmts = do
             return $ mkExe $ (exec hexe).const.(exec texe)
 
 
-
 data ExprSem = RValue {
                 expCid :: Cid,
                 expRValue :: Either (Exe Value) (Exe Pointer)
@@ -234,6 +233,14 @@ data ExprSem = RValue {
                 expCid :: Cid,
                 expRValue :: Either (Exe Value) (Exe Pointer),
                 setLValue :: Pointer -> Exe ()
+            } | ClsTmplValue {
+                expCid :: Cid,
+                expRValue :: Either (Exe Value) (Exe Pointer),
+                expTmplCid :: Cid
+            } | StrTmplValue {
+                expCid :: Cid,
+                expRValue :: Either (Exe Value) (Exe Pointer),
+                expTmplSid :: Sid
             }
 
 rValue :: ExprSem -> SemiCont Value

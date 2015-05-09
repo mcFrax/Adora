@@ -2,6 +2,15 @@
 == Aktualne ==
 ==============
 
+- Semantyka deklaracji
+    + struktur
+        - atrybutów
+        - properties
+        - metod
+    + klas
+        - properties
+        - metod
+    + wariantów etc.
 - Tablice
 - Stringi
 - Krotki?
@@ -9,7 +18,6 @@
 - Dodać placeholder '_' w let (...) = ...
 - Poprawki składni: konflikty shift/reduce, połączenie Expr i TypeExpr
 - Semantyka TypeExpr
-- Semantyka deklaracji
 - Dopracowanie semantyki bloków - co, kiedy, gdzie są ramki a gdzie nie
 - Inicjalizacja zmiennych
 - Typechecking
