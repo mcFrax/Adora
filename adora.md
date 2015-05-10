@@ -11,13 +11,13 @@ Zależało mi na tym, żeby wcisnąć tu parę
 
 ###System typów
 
-Ważnym elementem języka ma być system typów, częściowo oddzielający dziedziczenie implementacji od dziedziczenia interfejsu. Mają się na niego składać klasy, podobne do haskellowych, oraz struktury, porządkujące dane i implementujące ich interfejs (określany przez klasy). Klasy i struktury mogą być parametryzowane innymi typami (coś w rodzaju typów generycznych z Javy).
+Ważnym elementem języka ma być system typów, częściowo oddzielający dziedziczenie implementacji od dziedziczenia interfejsu. Mają się na niego składać klasy (class), podobne do haskellowych, oraz struktury (struct), porządkujące dane i implementujące ich interfejs (określany przez klasy). Klasy i struktury mogą być parametryzowane innymi typami (coś w rodzaju typów generycznych z Javy).
 
 Dostęp do pól (atrybutów) struktur jest chroniony, publicznie dostępne są natomiast własności (properties), mające zdefiniowane gettery i settery (być może tylko jeden z nich), i używane tak jak zwykle atrybuty (wywołanie metody jest niejawne).
 
-Funkcje mają być obiektami pierwszej klasy. Metody jako takie nie, ale metody związane z obiektem mają się dać używać jako funkcje.
+Funkcje mają być obiektami pierwszej klasy. Metody jako takie nie, ale metody związane z obiektem mają się dać używać jako funkcje (tzn. `object.foo()` jest równoważne z `(object.foo)()`.
 
-Znacznie obszerniejszy opis systemu klas postaram się dostarczyć z gotowym interpreterem - niektóre szczegóły wymagają jeszcze przemyślenia. Między innymi, nie jestem pewien, jak rozwiązać problem przestrzeni nazw klas i struktur - jednocześnie chciałbym, żeby mogły być wspólne, i jest to znaczącą przeszkodą (gryzie się co najmniej z refleksją, bo sama nazwa nie określa wystarczająco typu).
+Nazwy klas i struktur zaczynają się wielką literą i mogą się między sobą pokrywać. Nazwa struktury jest wyrażeniem, i może być używana jako funkcja (konstruktor).
 
 ###Biblioteka standardowa i typy wbudowane
 
@@ -63,4 +63,8 @@ Przykładowy kod znajduje się w pliku `example.ad`.
 Składnia
 ---
 
-Opis składni umieściłem w pliku `adora.cf`. Jest to poprawny, kompilujący się kod dla bnfc. Składnia celowo nie zawiera średników ani innych separatorów pomiędzy instrukcjami i deklaracjami. Chętnie wpisałbym końce linii do składni, i użył wcięć zamiast wąsatych nawiasów, jest to jednak duża komplikacja - z tego co wiem, parser wygenerowany przez bnfc nie potrafi tego obsłużyć. Być może jednak nie sprawdziłem wystarczająco możliwości jego "layout syntax" - jeżeli tak jest, prawdopodobnie zmienię składnię w odpowiedni sposób, dodając jakiś znaczek przed blokami, i średniki między instrukcjami i deklaracjami. Na pewno nie da to dokładnie tego, co bym chciał, ale być może będzie blisko.
+Składnia jest oparta o wcięcia i końce linii (w bnfc implementowane przez nawiasy klamrowe i średniki).
+Niektóre konstrukcje mogą wyglądać nienaturalnie - głównie włączenie składni nazw typów w sładnię wyrażeń -
+ale było to konieczne, żeby zachować jednoznaczność składni bez wprowadzania dodatkowych znaków sterujących.
+
+Plik bnfc to `adora.cf`.

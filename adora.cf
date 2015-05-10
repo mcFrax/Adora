@@ -24,22 +24,6 @@ position token DollarIdent ('$' (letter | digit | '_')*) ;
 MaybeComma_None. MaybeComma ::= ;
 MaybeComma_.     MaybeComma ::= "," ;
 
--- -- --
--- Type names
-
-separator TypeExpr "," ;
-
-_. TypeExpr ::= TypeExpr0 ;  -- not function notation
-_. TypeExpr ::= TypeExpr1 ;  -- function notation
-
-_.                   TypeExpr0 ::= "(" TypeExpr ")" ;
-TypeExpr_Name.       TypeExpr0 ::= UpperIdent ;
-TypeExpr_Var.        TypeExpr0 ::= DollarIdent ;
-TypeExpr_Qualified.  TypeExpr0 ::= TypeExpr0 "." UpperIdent ;
-TypeExpr_Insta.      TypeExpr0 ::= TypeExpr0 "<!" [TypeExpr] "!>" ;
-
-TypeExpr_Function.  TypeExpr1 ::= "(" [TypeExpr] ")" "->" TypeExpr ;
-
 
 -- -- --
 -- Declarations
@@ -64,8 +48,8 @@ _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definit
 
 _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
 MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
-ImplementationDefinition.   Decl0 ::= "implement" TypeExpr ":" "{" [Decl10] "}" ;
-FieldDefinition.            Decl0 ::= TypeExpr LowerIdent MaybeDefaultVal ;
+ImplementationDefinition.   Decl0 ::= "implement" Expr10 ":" "{" [Decl10] "}" ;
+FieldDefinition.            Decl0 ::= Expr10 LowerIdent MaybeDefaultVal ;
 PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" [PropDeclClause] "}" ;
 
 separator PropDeclClause "" ;
@@ -74,7 +58,7 @@ PropDeclClause_.   PropDeclClause ::= PropAttrName PropDeclClause1 ;
 _.                       PropDeclClause1 ::= PropDeclClause2 ;
 PropDeclClause_SecAttr.  PropDeclClause1 ::= PropAttrName PropDeclClause2 ;
 
-PropDeclClause_Def.      PropDeclClause2 ::= TypeExpr MaybePropAttrDef ;
+PropDeclClause_Def.      PropDeclClause2 ::= Expr10 MaybePropAttrDef ;
 PropDeclClause_Auto.     PropDeclClause2 ::= "auto" ;
 PropDeclClause_Undef.     PropDeclClause2 ::= "undefined" ;
 
@@ -85,26 +69,23 @@ PropAttrName_Get.  PropAttrName ::= "get" ;
 PropAttrName_Set.  PropAttrName ::= "set" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
-TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" TypeExpr ;
+TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr10 ;
 
 MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
-FunDef_Arg_Named. FunDef_Arg ::= TypeExpr LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= TypeExpr ; -- To chyba jest konflikt shift/reduce
+FunDef_Arg_Named. FunDef_Arg ::= Expr10 LowerIdent MaybeDefaultVal ;
+FunDef_Arg_Unnamed. FunDef_Arg ::= Expr10 ; -- To chyba jest konflikt shift/reduce
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 
-OptResultType_None. OptResultType ::= ;
-OptResultType_Some. OptResultType ::= "->" TypeExpr;
 
-
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [TypeExpr] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -114,10 +95,10 @@ separator TypeParamDef "," ;
 TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
 
 MaybeSuperclasses_None. MaybeSuperclasses ::= ;
-MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" [TypeExpr] ;
+MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" [Expr10] ;
 
 MaybeSubclasses_None. MaybeSubclasses ::= ;
-MaybeSubclasses_Some. MaybeSubclasses ::= ">" [TypeExpr] ;
+MaybeSubclasses_Some. MaybeSubclasses ::= ">" [Expr10] ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
@@ -160,8 +141,8 @@ AssignOper_Div.    AssignOper ::= "/=" ;
 AssignOper_IDiv.   AssignOper ::= "//=" ;
 
 separator CaseClause "" ;
-CaseClause_Unnamed.  CaseClause ::= [TypeExpr] StatementBlock ;
-CaseClause_As.       CaseClause ::= TypeExpr "as" LowerIdent StatementBlock ;
+CaseClause_Unnamed.  CaseClause ::= [Expr10] StatementBlock ;
+CaseClause_As.       CaseClause ::= Expr10 "as" LowerIdent StatementBlock ;
 
 ElseClauses_None. ElseClauses ::= ;
 ElseClauses_Else. ElseClauses ::= "else"  StatementBlock ;
@@ -170,7 +151,11 @@ ElseClauses_Elif. ElseClauses ::= "elif" Expr  StatementBlock ElseClauses ;
 -- -- --
 -- Expressions
 
-separator nonempty Expr "," ; -- for tuples
+-- -- --
+-- Type names
+
+separator nonempty Expr "," ;
+separator nonempty Expr10 "," ;
 _.              Expr ::= Expr0 ;
 
 _.              Expr0 ::= Expr1 ;
@@ -217,17 +202,16 @@ Expr_Minus.     Expr8 ::= "-" Expr8 ;
 -- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
 _.              Expr9 ::= Expr10 ;
-Expr_Cast.      Expr9 ::= Expr10 "as" TypeExpr ;
-Expr_Is.        Expr9 ::= Expr10 "is" TypeExpr ;  -- isinstance
+Expr_Cast.      Expr9 ::= Expr10 "as" Expr10 ;
+Expr_Is.        Expr9 ::= Expr10 "is" Expr10 ;  -- isinstance
 
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
 Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
-
-MaybeTemplateParams_None.  MaybeTemplateParams ::= ;
-MaybeTemplateParams_Some.  MaybeTemplateParams ::= "<!" [TypeExpr] "!>" ;
+Expr_TmplAppl.  Expr10 ::= Expr10 "<!" [Expr] "!>" ;
+Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
 
 separator FunCallArg "," ;
 FunCallArg_Positional. FunCallArg ::= Expr ;
@@ -238,12 +222,16 @@ Expr_Char.      Expr11 ::= Char ;
 Expr_String.    Expr11 ::= String ;
 Expr_Double.    Expr11 ::= Double ;
 Expr_Int.       Expr11 ::= Integer ;
-Expr_Tuple.     Expr11 ::= "(" Expr "," [Expr] ")" ;
 Expr_Array.     Expr11 ::= LstVal ;
 Expr_Var.       Expr11 ::= LowerIdent ;
-Expr_Type.      Expr11 ::= "[" TypeExpr "]" ;
+Expr_TypeName.  Expr11 ::= UpperIdent ;
+Expr_TypeVar.   Expr11 ::= DollarIdent ;
 
 LstVal_None.   LstVal ::= "[" "]" ;
 LstVal_Some.   LstVal ::= "[" [Expr] "]" ;
 
-_.              Expr12 ::= "(" Expr ")" ;
+Expr_Parens.   Expr12 ::= "(" [Expr] ")" OptResultType ;  -- TODO:pelna notacja sygnatury
+-- wspolny nieterminal dla wyrazenia w nawiasie, krotki, i sygnatury funkcji (bez typu zwracanego)
+
+OptResultType_None. OptResultType ::= ;
+OptResultType_Some. OptResultType ::= "->" Expr10;

@@ -31,6 +31,15 @@ data SemState = SemState {
 
 data ClassRule = ClassRule
 
+data Template a = Tmpl0 a
+                | TmplS Int (Sid -> Template a)
+                | TmplC Int (Cid -> Template a)
+
+type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] b)
+
+type StructTemplate = Template StructDesc
+type ClassTemplate = Template ClassDesc
+
 addRule :: ClassRule -> Semantic ()
 addRule rule = do
     modify $ \stt -> stt{sstClassRules=rule:(sstClassRules stt)}
@@ -41,15 +50,6 @@ newCid = do
     let cid = sstNextCid stt
     put stt{sstNextCid=cid+1}
     return cid
-
-data Template a = Tmpl0 a
-                | TmplS Int (Sid -> Template a)
-                | TmplC Int (Cid -> Template a)
-
-type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] b)
-
-type StructTemplate = Template StructDesc
-type ClassTemplate = Template ClassDesc
 
 
 -- To samo mozna by dostac uzywajac ErrorT, StateT i Reader,
@@ -233,14 +233,11 @@ data ExprSem = RValue {
                 expCid :: Cid,
                 expRValue :: Either (Exe Value) (Exe Pointer),
                 setLValue :: Pointer -> Exe ()
-            } | ClsTmplValue {
+            } | TypeValue {
                 expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer),
-                expTmplCid :: Cid
-            } | StrTmplValue {
-                expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer),
-                expTmplSid :: Sid
+                expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
+                expCls :: Maybe (Either Cid CTid)
+                expStr :: Maybe (Either Cid CTid)
             }
 
 rValue :: ExprSem -> SemiCont Value

@@ -13,6 +13,7 @@
 
 Docadora.txt
 Absadora.hs
+Layoutadora.hs
 Lexadora.hs
 Paradora.hs
 Paradora.info
@@ -21,6 +22,7 @@ Skeladora.hs
 Testadora.hs
 ErrM.hs
 
-Readme.html
-Makefile
+adora.html
+adora.pdf
 Testadora
+interpreter
