@@ -8,7 +8,8 @@ BnfcFiles := $(subst __,$(Langname),Lex__.x Par__.y Doc__.tex Abs__.hs Print__.h
 all: interpreter
 
 interpreter: $(ParserObjects) $(OtherHs)
-	ghc -Wall -Werror --make interpreter.hs -o interpreter
+	@#ghc -Wall -Werror --make interpreter.hs -o interpreter
+	ghc -Wall --make interpreter.hs -o interpreter
 
 Testadora: $(ParserObjects)
 	ghc --make Testadora.hs -o Testadora
@@ -31,7 +32,7 @@ adora.html: adora.md
 
 $(BnfcFiles): $(Langname).cf
 	bnfc -haskell adora.cf
-	touch $(BnfcFiles)
+	touch $(BnfcFiles)  # let's make know these files are up to date
 
 clean:
 	-rm -f *.log *.aux *.hi *.o *.dvi *.x *.y

@@ -77,7 +77,10 @@ FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
 FunDef_Arg_Named. FunDef_Arg ::= Expr10 LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= Expr10 ; -- To chyba jest konflikt shift/reduce
+FunDef_Arg_Unnamed. FunDef_Arg ::= "_" Expr10 ;
+
+OptResultType_None. OptResultType ::= ;
+OptResultType_Some. OptResultType ::= "->" Expr10;
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
@@ -230,8 +233,5 @@ Expr_TypeVar.   Expr11 ::= DollarIdent ;
 LstVal_None.   LstVal ::= "[" "]" ;
 LstVal_Some.   LstVal ::= "[" [Expr] "]" ;
 
-Expr_Parens.   Expr12 ::= "(" [Expr] ")" OptResultType ;  -- TODO:pelna notacja sygnatury
--- wspolny nieterminal dla wyrazenia w nawiasie, krotki, i sygnatury funkcji (bez typu zwracanego)
-
-OptResultType_None. OptResultType ::= ;
-OptResultType_Some. OptResultType ::= "->" Expr10;
+Expr_Parens.   Expr12 ::= "(" [Expr] ")" ;
+-- wspolny nieterminal dla wyrazenia w nawiasie i krotki

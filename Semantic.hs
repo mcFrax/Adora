@@ -236,7 +236,7 @@ data ExprSem = RValue {
             } | TypeValue {
                 expCid :: Cid,
                 expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
-                expCls :: Maybe (Either Cid CTid)
+                expCls :: Maybe (Either Cid CTid),
                 expStr :: Maybe (Either Cid CTid)
             }
 
@@ -384,7 +384,6 @@ exprSem (Expr_Var (LowerIdent (_, varName))) = do
         exeGet = mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
         exeSet pt = mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
     return $ LValue cid exeGet exeSet
--- exprSem (Expr_Type _) _ = ???
 
 exprSem (Expr_Not expr) = do
     exee <- exprSem expr
@@ -471,8 +470,7 @@ exprSem (Expr_Lambda signature block) = do
     return $ RValue cid $ mkExeV $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
-exprSem (Expr_Type typeExpr) = do  -- for now - only as struct constructor
-    let (TypeExpr_Name (UpperIdent (_, typeName))) = typeExpr
+exprSem (Expr_TypeName (UpperIdent (_, typeName))) = do
     sid <- asks $ (!!! typeName).envStructs
     struct <- gets $ (!!! sid).globStructs.sstGlob
     let strCid = structCid struct
