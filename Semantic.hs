@@ -455,9 +455,9 @@ exprSem (Expr_Lambda signature block) = do
 
             bodyCont :: Cont
             bodyCont re mem = do
-                hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
-                                    (show $ length defSgns) ++ ", " ++
-                                    (show $ M.size defArgs))
+--                 hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
+--                                     (show $ length defSgns) ++ ", " ++
+--                                     (show $ M.size defArgs))
                 (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
 
             in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1

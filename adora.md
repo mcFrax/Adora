@@ -1,6 +1,27 @@
 Język Adora
 ===
 
+Realizacja
+---
+
+Wersja którą przesyłam w pierwszym terminie jest b. mocno okrojona, ale ma duży potencjał do rozwoju. Rzeczy działające w tym momencie:
+
+- 3 mniej lub bardziej używalne typy (int, bool i funkcje)
+- zmienne z przypisaniem
+- instrukcja `if` (z `elif` i `else`)
+- pętla `while` z `continue` i `break`
+- podstawowa arytmetyka (`+`, `-`, `*`, `//` (`div`), `%` (`mod`)) i porównania (`==`, `!=`)
+- funkcje anonimowe (lambda wyrażenia), zagnieżdżane, z domknięciami a'la JavaScript
+    (jest to jednyny sposób tworzenia funkcji)
+
+Brakuje obsługi I/O, zamiast tego każda instrukcja będąca wyrażeniem wypisuje swoją wartość (po wyliczeniu).
+Nie ma również kontroli typów, statycznej ani dynamicznej (tzn. żadna wartość nie zostanie źle zinterpretowana, ale w trakcie wykonania
+program może się po prostu wysypywać na błędzie `Non-exhaustive patterns ...`).
+
+Wydaje mi się, że wychodzi z tego 12 punktów (na 16 brakuje I/O), i na ten moment jest to dla mnie całkowicie wystarczające.
+Przed drugim terminem oddawania mam zamiar wysłać wersję znacznie bogatszą, na pełne 24 punkty.
+
+
 Opis ogólny
 ---
 
@@ -19,46 +40,9 @@ Funkcje mają być obiektami pierwszej klasy. Metody jako takie nie, ale metody 
 
 Nazwy klas i struktur zaczynają się wielką literą i mogą się między sobą pokrywać. Nazwa struktury jest wyrażeniem, i może być używana jako funkcja (konstruktor).
 
-###Biblioteka standardowa i typy wbudowane
-
-Niestety, nie zdążyłem jeszcze porządnie przemyśleć biblioteki standardowej i typów wbudowanych, więc mogę podać tylko ogólną listę przewidzianych składników:
-
-- standardowe typy takie jak `Bool`, `Int`, `Char`, `Double`, `String`
-- kontenery: listy, tablice, krotki
-- zestaw podstawowych klas, takich jak (być może inaczej nazwane):
-
-    + `Object`, bazowa klasa dziedziczona _implicite_ przez wszystkie inne
-    + `Show`, `Eq` i `Ord` z Haskella,
-    + `Bool`,
-    + `Index` (udostępniające składnię indeksu),
-    + `Function` udostępniające składnię wywołania funkcji,
-    + `Copy`
-    + `Type` (refleksja)
-
-- obiekt typu `Type`jest konstruktorems
-- wejście/wyjście (co najmniej jakieś podstawowe funkcje do obsługi stdin/stdout)
-
-###Inne szczegóły
-
-- niejawne argumenty:
-
-    + `self` w metodach (w tym setterach i getterach) jest obiektem, na którym metoda została wywołana
-    + `value` w setterze jest przypisywaną wartością
-
-- domknięcia
-
-- instrukcja `return` powinna być pomijalna, jeżeli ostatnie wyrażenie w bloku ma odpowiedni typ
-
-- w języku brakuje wyjątków; chciałbym je dodać, jeżeli starczy mi na to czasu, ale prawdopodobnie tak się nie stanie. Dlatego nie umieszczam ich na razie w składni, nie chcąc przeciążać jej nadmiarowymi i nieprzemyślanymi strukturami.
-
 ###Nazwa
 
 Nazwa języka pochodzi od imienia jednej z bohaterek Terrego Pratchetta, Adory Dearheart. Została wybrana ze względu na ładne brzmienie, i nie ma w niej żadnego ukrytego sensu.
-
-Przykładowy kod
----
-
-Przykładowy kod znajduje się w pliku `example.ad`.
 
 Składnia
 ---

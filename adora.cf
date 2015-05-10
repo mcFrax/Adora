@@ -18,12 +18,6 @@ position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' (letter | digit | '_')*) ;
 
--- -- --
--- Utils
-
-MaybeComma_None. MaybeComma ::= ;
-MaybeComma_.     MaybeComma ::= "," ;
-
 
 -- -- --
 -- Declarations
@@ -98,10 +92,10 @@ separator TypeParamDef "," ;
 TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
 
 MaybeSuperclasses_None. MaybeSuperclasses ::= ;
-MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" [Expr10] ;
+MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" Expr10 ;
 
 MaybeSubclasses_None. MaybeSubclasses ::= ;
-MaybeSubclasses_Some. MaybeSubclasses ::= ">" [Expr10] ;
+MaybeSubclasses_Some. MaybeSubclasses ::= ">" Expr10 ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
@@ -145,7 +139,6 @@ AssignOper_IDiv.   AssignOper ::= "//=" ;
 
 separator CaseClause "" ;
 CaseClause_Unnamed.  CaseClause ::= [Expr10] StatementBlock ;
-CaseClause_As.       CaseClause ::= Expr10 "as" LowerIdent StatementBlock ;
 
 ElseClauses_None. ElseClauses ::= ;
 ElseClauses_Else. ElseClauses ::= "else"  StatementBlock ;
