@@ -391,14 +391,22 @@ exprSem (Expr_Not expr) = do
         rValue exee $ \(ValBool bval) -> do
             ke $ ValBool $ not bval
 
-exprSem (Expr_RelOper exp1 RelOper_Eq exp2) = do
+exprSem (Expr_RelOper exp1 oper exp2) = do
     -- TODO: laczenie operatorow,
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
     return $ RValue boolCid $ mkExeV $ \ke -> do
         rValue e1exe $ \(ValInt v1) -> do
             rValue e2exe $ \(ValInt v2) -> do
-                ke (ValBool $ v1 == v2)
+                ke (ValBool $ operFun v1 v2)
+    where
+        operFun = case oper of
+            RelOper_Eq -> (==)
+            RelOper_Neq -> (/=)
+            RelOper_Lt -> (<)
+            RelOper_Lte -> (<=)
+            RelOper_Gt -> (>)
+            RelOper_Gte -> (>=)
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
 exprSem (Expr_Sub exp1 exp2) = intBinopSem (-) exp1 exp2

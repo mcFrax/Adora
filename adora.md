@@ -10,7 +10,8 @@ Wersja którą przesyłam w pierwszym terminie jest b. mocno okrojona, ale ma du
 - zmienne z przypisaniem
 - instrukcja `if` (z `elif` i `else`)
 - pętla `while` z `continue` i `break`
-- podstawowa arytmetyka (`+`, `-`, `*`, `//` (`div`), `%` (`mod`)) i porównania (`==`, `!=`)
+- podstawowa arytmetyka (`+`, `-`, `*`, `//` (`div`), `%` (`mod`)) i porównania (`==`, `!=`, `<`, `<=`, `>`, `>=`).
+    Składnia przewiduje łączenie porównań jak w pythonie, ale nie jest to w tej chwili zaimplementowane.
 - funkcje anonimowe (lambda wyrażenia), zagnieżdżane, z domknięciami a'la JavaScript
     (jest to jednyny sposób tworzenia funkcji)
 
@@ -19,7 +20,7 @@ Nie ma również kontroli typów, statycznej ani dynamicznej (tzn. żadna warto�
 program może się po prostu wysypywać na błędzie `Non-exhaustive patterns ...`).
 
 Wydaje mi się, że wychodzi z tego 12 punktów (na 16 brakuje I/O), i na ten moment jest to dla mnie całkowicie wystarczające.
-Przed drugim terminem oddawania mam zamiar wysłać wersję znacznie bogatszą, na pełne 24 punkty.
+Przed drugim terminem (oddawania) mam zamiar wysłać wersję znacznie bogatszą, na pełne 24 punkty.
 
 
 Opis ogólny
@@ -27,8 +28,7 @@ Opis ogólny
 
 Obiektowy język programowania, imperatywny, statycznie typowany, refleksyjny, z rozbudowanym systemem typów i częściowym wsparciem dla funkcyjnego stylu programowania.
 
-Język jest opracywany przeze mnie na potrzeby tego zadania, i z pewnością w wielu miejscach niedopracowany. Niewykluczone, że jakieś elementy składni będę musiał dodać bądź zmienić w trakcie implementacji, żeby ostatecznie wyszło z tego coś sensownego.
-Zależało mi na tym, żeby wcisnąć tu parę
+Język jest opracywany przeze mnie na potrzeby tego zadania, i z pewnością w wielu miejscach niedopracowany, chociaż od wersji wstępnej jest chyba widoczny postęp.
 
 ###System typów
 
@@ -50,5 +50,7 @@ Składnia
 Składnia jest oparta o wcięcia i końce linii (w bnfc implementowane przez nawiasy klamrowe i średniki).
 Niektóre konstrukcje mogą wyglądać nienaturalnie - głównie włączenie składni nazw typów w sładnię wyrażeń -
 ale było to konieczne, żeby zachować jednoznaczność składni bez wprowadzania dodatkowych znaków sterujących.
+
+Jeżeli używa się wcięć zamiast jawnych klamerek, to w notacji if-a konieczne jest, żeby wszystkie bloki były niepuste (może być np. `pass`).
 
 Plik bnfc to `adora.cf`.

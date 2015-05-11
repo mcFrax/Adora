@@ -42,8 +42,8 @@ _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definit
 
 _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
 MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
-ImplementationDefinition.   Decl0 ::= "implement" Expr10 ":" "{" [Decl10] "}" ;
-FieldDefinition.            Decl0 ::= Expr10 LowerIdent MaybeDefaultVal ;
+ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
+FieldDefinition.            Decl0 ::= Expr9 LowerIdent MaybeDefaultVal ;
 PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" [PropDeclClause] "}" ;
 
 separator PropDeclClause "" ;
@@ -52,7 +52,7 @@ PropDeclClause_.   PropDeclClause ::= PropAttrName PropDeclClause1 ;
 _.                       PropDeclClause1 ::= PropDeclClause2 ;
 PropDeclClause_SecAttr.  PropDeclClause1 ::= PropAttrName PropDeclClause2 ;
 
-PropDeclClause_Def.      PropDeclClause2 ::= Expr10 MaybePropAttrDef ;
+PropDeclClause_Def.      PropDeclClause2 ::= Expr9 MaybePropAttrDef ;
 PropDeclClause_Auto.     PropDeclClause2 ::= "auto" ;
 PropDeclClause_Undef.     PropDeclClause2 ::= "undefined" ;
 
@@ -63,26 +63,26 @@ PropAttrName_Get.  PropAttrName ::= "get" ;
 PropAttrName_Set.  PropAttrName ::= "set" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
-TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr10 ;
+TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
 
 MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
-FunDef_Arg_Named. FunDef_Arg ::= Expr10 LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= "_" Expr10 ;
+FunDef_Arg_Named. FunDef_Arg ::= Expr9 LowerIdent MaybeDefaultVal ;
+FunDef_Arg_Unnamed. FunDef_Arg ::= Expr9 "_" ;
 
 OptResultType_None. OptResultType ::= ;
-OptResultType_Some. OptResultType ::= "->" Expr10;
+OptResultType_Some. OptResultType ::= "->" Expr9;
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 
 
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr10] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -92,10 +92,10 @@ separator TypeParamDef "," ;
 TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
 
 MaybeSuperclasses_None. MaybeSuperclasses ::= ;
-MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" Expr10 ;
+MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" Expr9 ;
 
 MaybeSubclasses_None. MaybeSubclasses ::= ;
-MaybeSubclasses_Some. MaybeSubclasses ::= ">" Expr10 ;
+MaybeSubclasses_Some. MaybeSubclasses ::= ">" Expr9 ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
@@ -120,7 +120,7 @@ Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
 Stmt_Return.        Stmt ::= "return" ;
 Stmt_ReturnValue.   Stmt ::= "return" Expr ;
-Stmt_If.            Stmt ::= "if" Expr  StatementBlock ElseClauses ;
+Stmt_If.            Stmt ::= "if" Expr StatementBlock ElseClauses ;
 Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
@@ -138,11 +138,11 @@ AssignOper_Div.    AssignOper ::= "/=" ;
 AssignOper_IDiv.   AssignOper ::= "//=" ;
 
 separator CaseClause "" ;
-CaseClause_Unnamed.  CaseClause ::= [Expr10] StatementBlock ;
+CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
 
 ElseClauses_None. ElseClauses ::= ;
-ElseClauses_Else. ElseClauses ::= "else"  StatementBlock ;
-ElseClauses_Elif. ElseClauses ::= "elif" Expr  StatementBlock ElseClauses ;
+ElseClauses_Else. ElseClauses ::= ";" "else"  StatementBlock ;
+ElseClauses_Elif. ElseClauses ::= ";" "elif" Expr StatementBlock ElseClauses ;
 
 -- -- --
 -- Expressions
@@ -151,7 +151,7 @@ ElseClauses_Elif. ElseClauses ::= "elif" Expr  StatementBlock ElseClauses ;
 -- Type names
 
 separator nonempty Expr "," ;
-separator nonempty Expr10 "," ;
+separator nonempty Expr9 "," ;
 _.              Expr ::= Expr0 ;
 
 _.              Expr0 ::= Expr1 ;
@@ -200,6 +200,7 @@ Expr_Minus.     Expr8 ::= "-" Expr8 ;
 _.              Expr9 ::= Expr10 ;
 Expr_Cast.      Expr9 ::= Expr10 "as" Expr10 ;
 Expr_Is.        Expr9 ::= Expr10 "is" Expr10 ;  -- isinstance
+Expr_FnType.    Expr9 ::= FnSignature ;
 
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;

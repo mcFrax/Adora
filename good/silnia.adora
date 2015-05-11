@@ -1,0 +1,18 @@
+let silnia = fn(Int n) -> Int:
+    if n <= 1:
+        return 1
+    else:
+        return n*silnia(n-1)
+
+assert silnia(n=0) == 1
+assert silnia(n=1) == 1
+assert silnia(2) == 2
+assert silnia(3) == 6
+assert silnia(4) == 24
+assert silnia(5) == 5*silnia(4)
+
+var ii = 1
+while ii <= 15:
+    silnia(ii)  # wypisanie wartości
+    assert silnia(ii) == ii * silnia(ii-1)
+    ii = ii + 1
