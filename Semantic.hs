@@ -259,10 +259,6 @@ execPt (Left exeVal) = \kpt -> do
         kpt pt re mem'
 execPt (Right exePt) = exec exePt
 
--- exeExpr :: ExprSem -> Exe ()
--- exeExpr (RValue _ e) = mkExe $ (exec e).const.(exec noop)
--- exeExpr (LValue _ e _) = mkExe $ (exec e).const.(exec noop)
-
 mkExeV :: SemiCont Value -> Either (Exe Value) (Exe Pointer)
 mkExeV = (Left).mkExe
 
@@ -305,8 +301,11 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
     lexe <- exprSem lexpr
     rexe <- exprSem rexpr
 --     typecheck  ...
-    return $ mkExe $ \k -> do
-        rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
+    case lexe of
+         LValue {} -> do
+            return $ mkExe $ \k -> do
+                rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
+         _ -> throwError $ SemanticError $ "Left side of assignment is not l-value"
 
 stmtSem (Stmt_If condexpr block elses) = do
     exeCond <- exprSem condexpr
