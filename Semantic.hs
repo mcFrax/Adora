@@ -8,6 +8,7 @@ import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 
 import qualified Data.Map.Strict as M
+import Data.Maybe
 import qualified Data.Set as S
 
 import System.Exit(exitFailure)
@@ -196,7 +197,8 @@ moduleSem (Module_ stmts) = do
             envStructs=M.fromList [
                 ("Foo", fooCid)
             ],
-            envExpectedReturnType=Nothing
+            envExpectedReturnType=Nothing,
+            envInsideLoop=False
         }
 
         emptyMem = Memory {
@@ -325,7 +327,7 @@ stmtSem (Stmt_If condexpr block elses) = do
 
 stmtSem (Stmt_While condexpr block) = do
     exeCond <- exprSem condexpr
-    exeBody <-stmtBlockSem block
+    exeBody <-local (\e -> e{envInsideLoop=True}) $ stmtBlockSem block
     return $ fix $ \exeLoop -> do
         mkExe $ \k re -> do
             let popRe re'' = re''{
@@ -390,22 +392,46 @@ exprSem (Expr_Not expr) = do
         rValue exee $ \(ValBool bval) -> do
             ke $ ValBool $ not bval
 
-exprSem (Expr_RelOper exp1 oper exp2) = do
-    -- TODO: laczenie operatorow,
-    e1exe <- exprSem exp1
-    e2exe <- exprSem exp2
+exprSem expr@(Expr_RelOper {}) = do
+    sem' <- exprSem' expr
     return $ RValue boolCid $ mkExeV $ \ke -> do
-        rValue e1exe $ \(ValInt v1) -> do
-            rValue e2exe $ \(ValInt v2) -> do
-                ke (ValBool $ operFun v1 v2)
+        exec sem' $ \maybeVal -> do
+            ke $ ValBool $ isJust maybeVal
     where
-        operFun = case oper of
-            RelOper_Eq -> (==)
-            RelOper_Neq -> (/=)
-            RelOper_Lt -> (<)
-            RelOper_Lte -> (<=)
-            RelOper_Gt -> (>)
-            RelOper_Gte -> (>=)
+        exprSem' :: Expr -> Semantic (Exe (Maybe Value))
+        exprSem' (Expr_RelOper exp1 oper exp2) = do
+            e1exe <- exprSem' exp1
+            e2exe <- exprSem exp2
+            return $ mkExe $ \kmv -> do
+                exec e1exe $ \maybeVal -> do
+                    case maybeVal of
+                        Just val1 -> do
+                            rValue e2exe $ \val2 -> do
+                                if operFun (valToInt val1) (valToInt val2) then
+                                    kmv $ Just val2
+                                else
+                                    kmv Nothing
+                        Nothing -> kmv Nothing
+                where
+                    operFun = case oper of
+                        RelOper_Eq -> (==)
+                        RelOper_Neq -> (/=)
+                        RelOper_Lt -> (<)
+                        RelOper_Lte -> (<=)
+                        RelOper_Gt -> (>)
+                        RelOper_Gte -> (>=)
+                        _ -> undefined
+        exprSem' expr' = do
+            exee <- exprSem expr'
+            return $ mkExe $ \kmv -> do
+                rValue exee $ \v -> kmv $ Just v
+--     exprSem' (Expr_RelOper exp1 oper exp2)
+--     e1exe <- exprSem exp1
+--     e2exe <- exprSem exp2
+--     return $ RValue boolCid $ mkExeV $ \ke -> do
+--         rValue e1exe $ \(ValInt v1) -> do
+--             rValue e2exe $ \(ValInt v2) -> do
+--                 ke (ValBool $ operFun v1 v2)
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
 exprSem (Expr_Sub exp1 exp2) = intBinopSem (-) exp1 exp2
@@ -422,7 +448,7 @@ exprSem (Expr_Minus expr) = do
 
 exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSignatureSem signature
-    exeBody <-stmtBlockSem block
+    exeBody <- local (\e -> e{envInsideLoop=False}) $ stmtBlockSem block
     cid <- newCid
     let exeFunction closureFid argTuples = do
         mkExeV $ \ke re0 mem0 -> let

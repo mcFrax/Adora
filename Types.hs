@@ -26,7 +26,8 @@ data LocEnv = LocEnv {
     envVars :: M.Map VarName VarType,
     envClasses :: M.Map VarName Cid,
     envStructs :: M.Map VarName Sid,
-    envExpectedReturnType :: Maybe Cid
+    envExpectedReturnType :: Maybe Cid,
+    envInsideLoop :: Bool -- whether break and continue are legal
 } deriving Show
 
 data GlobEnv = GlobEnv {
