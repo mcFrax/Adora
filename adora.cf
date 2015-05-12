@@ -70,8 +70,7 @@ MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
-FunDef_Arg_Named. FunDef_Arg ::= Expr9 LowerIdent MaybeDefaultVal ;
-FunDef_Arg_Unnamed. FunDef_Arg ::= Expr9 "_" ;
+FunDef_Arg_. FunDef_Arg ::= Expr9 LowerIdent MaybeDefaultVal ;
 
 OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" Expr9;

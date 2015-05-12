@@ -622,7 +622,14 @@ fnSignatureSem (FnSignature_ args _) = do
     return (funSgn, defArgsMap)
     where
         argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe Pointer))
-        argSem (FunDef_Arg_Named _ (LowerIdent (_, name)) defVal) = do
+        argSem (FunDef_Arg_ _ (LowerIdent (_, "_")) defVal) = do
+            -- TODO: process type
+            return $ (ArgSgn {
+                argName=Nothing,
+                argType=undefined,
+                argHasDefault=False
+            }, Nothing)
+        argSem (FunDef_Arg_ _ (LowerIdent (_, name)) defVal) = do
             -- TODO: process type
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
@@ -637,13 +644,6 @@ fnSignatureSem (FnSignature_ args _) = do
                 argType=undefined,
                 argHasDefault=hasDef
             }, defExe)
-        argSem (FunDef_Arg_Unnamed _) = do
-            -- TODO: process type
-            return $ (ArgSgn {
-                argName=Nothing,
-                argType=undefined,
-                argHasDefault=False
-            }, Nothing)
         argToMap m (_, Nothing) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
