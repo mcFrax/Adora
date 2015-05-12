@@ -222,10 +222,39 @@ stmtSeqSem stmts = do
     where
         stmtSeqSem' [] = return noop -- TODO: check return
         stmtSeqSem' (h:t) = do
-            hexe <- stmtSem h
+            (hexe, t') <- case h of
+                Stmt_If condExpr bodyBlock -> do
+                    let (elses, t') = stripElses t
+                    hexe <- ifSem condExpr bodyBlock elses
+                    return (hexe, t')
+                _ -> do
+                    hexe <- stmtSem h
+                    return (hexe, t)
             modifiedEnv <- ask  -- TODO: env modification (including var initialization)
-            texe <- local (const modifiedEnv) $ stmtSeqSem' t
+            texe <- local (const modifiedEnv) $ stmtSeqSem' t'
             return $ mkExe $ (exec hexe).const.(exec texe)
+        stripElses ((Stmt_Elif condExpr bodyBlock):t) = let
+            ((elifs, maybeElse), t') = stripElses t
+            in (((condExpr, bodyBlock):elifs, maybeElse), t')
+        stripElses ((Stmt_Else bodyBlock):t) = do
+            (([], Just bodyBlock), t)
+        stripElses t = do
+            (([], Nothing), t)
+        ifSem condExpr bodyBlock elses = do
+            exeCond <- exprSem condExpr
+            exeThen <-stmtBlockSem bodyBlock
+            exeElse <- elseSem elses
+            return $ mkExe $ \k ->
+                rValue exeCond $ \condVal ->
+                    if isTruthy condVal then
+                        exec exeThen k
+                    else
+                        exec exeElse k
+            where
+                elseSem ([], Nothing) = return noop
+                elseSem ([], Just elseBody) = stmtBlockSem elseBody
+                elseSem (((condExpr', bodyBlock'):elifs), maybeElse) = do
+                    ifSem condExpr' bodyBlock' (elifs, maybeElse)
 
 
 data ExprSem = RValue {
@@ -309,24 +338,12 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
                 rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
          _ -> throwError $ SemanticError $ "Left side of assignment is not l-value"
 
-stmtSem (Stmt_If condexpr block elses) = do
-    exeCond <- exprSem condexpr
-    exeThen <-stmtBlockSem block
-    exeElse <- elseSem elses
-    return $ mkExe $ \k ->
-        rValue exeCond $ \condVal ->
-            if isTruthy condVal then
-                exec exeThen k
-            else
-                exec exeElse k
-    where
-        elseSem ElseClauses_None = return noop
-        elseSem (ElseClauses_Else elseBlock) = stmtBlockSem elseBlock
-        elseSem (ElseClauses_Elif elifcondexpr elseBlock moreElses) = do
-            stmtSem (Stmt_If elifcondexpr elseBlock moreElses)
+stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
+stmtSem (Stmt_Elif {}) = throwError $ SemanticError $ "Unexpected elif statement"
+stmtSem (Stmt_Else {}) = throwError $ SemanticError $ "Unexpected else statement"
 
-stmtSem (Stmt_While condexpr block) = do
-    exeCond <- exprSem condexpr
+stmtSem (Stmt_While condExpr block) = do
+    exeCond <- exprSem condExpr
     exeBody <-local (\e -> e{envInsideLoop=True}) $ stmtBlockSem block
     return $ fix $ \exeLoop -> do
         mkExe $ \k re -> do

@@ -120,7 +120,9 @@ Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
 Stmt_Return.        Stmt ::= "return" ;
 Stmt_ReturnValue.   Stmt ::= "return" Expr ;
-Stmt_If.            Stmt ::= "if" Expr StatementBlock ElseClauses ;
+Stmt_If.            Stmt ::= "if" Expr StatementBlock ;
+Stmt_Elif.          Stmt ::= "elif" Expr StatementBlock ;
+Stmt_Else.          Stmt ::= "else" StatementBlock ;
 Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
@@ -139,10 +141,6 @@ AssignOper_IDiv.   AssignOper ::= "//=" ;
 
 separator CaseClause "" ;
 CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
-
-ElseClauses_None. ElseClauses ::= ;
-ElseClauses_Else. ElseClauses ::= ";" "else"  StatementBlock ;
-ElseClauses_Elif. ElseClauses ::= ";" "elif" Expr StatementBlock ElseClauses ;
 
 -- -- --
 -- Expressions

@@ -2,7 +2,6 @@
 == Aktualne ==
 ==============
 
-- Sprawdzić `continue`
 - Podkreślnik jako pusty identyfikator
 - Semantyka deklaracji
     + struktur
@@ -13,6 +12,8 @@
         - properties
         - metod
     + wariantów etc.
+- Templaty klas
+- Templaty struktur
 - Tablice
 - Stringi
 - Krotki?
@@ -23,8 +24,6 @@
 - Dopracowanie semantyki bloków - co, kiedy, gdzie są ramki a gdzie nie
 - Inicjalizacja zmiennych
 - Typechecking
-- Templaty klas
-- Templaty struktur
 - Pętla for
 - Jak przechowywać statyczną informację o _strukturze_? Tzn. skąd brać informację
     o legalnych do użycia atrybutach? Może jednak powinny być w klasie, albo właśnie
