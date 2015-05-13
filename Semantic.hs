@@ -57,7 +57,7 @@ newCid = do
 -- ale ilosc liftow bylaby przytlaczajaca - zaimplementowanie
 -- tego w jednym kawalku eliminuje je wszystkie.
 newtype Semantic a = Semantic {
-    runSemantic :: SemState -> LocEnv -> Either SemanticError (SemState, LocEnv, a)
+    runSemantic :: SemState -> LocEnv -> Either SErr (SemState, LocEnv, a)
 }
 
 instance Monad Semantic where
@@ -66,7 +66,7 @@ instance Monad Semantic where
         runSemantic (esr2 x) st' env'
     return x = Semantic $ \st env -> return (st, env, x)
 
-instance MonadError SemanticError Semantic where
+instance MonadError SErr Semantic where
     throwError e = Semantic $ \_ _ -> throwError e
     (Semantic try) `catchError` h = Semantic $ \st e -> do
         (try st e) `catchError` (\err -> runSemantic (h err) st e)
@@ -88,13 +88,16 @@ modifyEnv :: (LocEnv -> LocEnv) -> Semantic ()
 modifyEnv f = setEnv =<< (liftM f ask)
 
 
-data SemanticError = SemanticError String
+data SErr = SErr String
+          | SErrP (Int, Int) String
 
-instance Error SemanticError where
-  strMsg = SemanticError
+instance Error SErr where
+  strMsg = SErr
 
-showSemError :: SemanticError -> String
-showSemError (SemanticError s) = "SemanticError: " ++ s
+showSemError :: SErr -> String
+showSemError (SErr s) = "?:?: error: " ++ s
+showSemError (SErrP (ln, col) s) = do
+    (show ln) ++ ":" ++ (show col) ++ ": error: " ++ s
 
 boolCid :: Cid
 boolCid = 0-1
@@ -123,7 +126,7 @@ mkMth mth = PropImpl {
     propSetter=(error "Methods are read-only properties")
 }
 
-moduleSem :: Module -> Either SemanticError (IO ())
+moduleSem :: Module -> Either SErr (IO ())
 moduleSem (Module_ stmts) = do
     (sst, _, sem) <- runSemantic (stmtSeqSem stmts) initSemState outerEnv
     let runEnv = RunEnv {
@@ -223,7 +226,7 @@ stmtSeqSem stmts = do
         stmtSeqSem' [] = return noop -- TODO: check return
         stmtSeqSem' (h:t) = do
             (hexe, t') <- case h of
-                Stmt_If condExpr bodyBlock -> do
+                Stmt_If (Tok_If (pos, _)) condExpr bodyBlock -> do
                     let (elses, t') = stripElses t
                     hexe <- ifSem condExpr bodyBlock elses
                     return (hexe, t')
@@ -233,10 +236,10 @@ stmtSeqSem stmts = do
             modifiedEnv <- ask  -- TODO: env modification (including var initialization)
             texe <- local (const modifiedEnv) $ stmtSeqSem' t'
             return $ mkExe $ (exec hexe).const.(exec texe)
-        stripElses ((Stmt_Elif condExpr bodyBlock):t) = let
+        stripElses ((Stmt_Elif (Tok_Elif (pos, _)) condExpr bodyBlock):t) = let
             ((elifs, maybeElse), t') = stripElses t
             in (((condExpr, bodyBlock):elifs, maybeElse), t')
-        stripElses ((Stmt_Else bodyBlock):t) = do
+        stripElses ((Stmt_Else (Tok_Else (pos, _)) bodyBlock):t) = do
             (([], Just bodyBlock), t)
         stripElses t = do
             (([], Nothing), t)
@@ -336,11 +339,11 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
          LValue {} -> do
             return $ mkExe $ \k -> do
                 rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
-         _ -> throwError $ SemanticError $ "Left side of assignment is not l-value"
+         _ -> throwError $ SErr $ "Left side of assignment is not l-value"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
-stmtSem (Stmt_Elif {}) = throwError $ SemanticError $ "Unexpected elif statement"
-stmtSem (Stmt_Else {}) = throwError $ SemanticError $ "Unexpected else statement"
+stmtSem (Stmt_Elif {}) = throwError $ SErr $ "Unexpected elif statement"
+stmtSem (Stmt_Else {}) = throwError $ SErr $ "Unexpected else statement"
 
 stmtSem (Stmt_While condExpr block) = do
     exeCond <- exprSem condExpr
@@ -370,37 +373,37 @@ stmtSem Stmt_Break = do
     if insideLoop then
         return $ mkExe $ \_ re -> reBreak re re
     else
-        throwError $ SemanticError $ "Unexpected break statement"
+        throwError $ SErr $ "Unexpected break statement"
 stmtSem Stmt_Continue = do
     insideLoop <- asks envInsideLoop
     if insideLoop then
         return $ mkExe $ \_ re -> reContinue re re
     else
-        throwError $ SemanticError $ "Unexpected continue statement"
-stmtSem Stmt_Return = do
+        throwError $ SErr $ "Unexpected continue statement"
+stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
     rType <- asks envExpectedReturnType
     case rType of
         Just Nothing ->
             return $ mkExe $ \_ re -> reReturn re ValNull re
         Just cid ->
-            throwError $ SemanticError $ ("Return statement without value " ++
-                                          "in funtion with return type")
+            throwError $ SErrP pos ("Return statement without value " ++
+                                    "in funtion with return type")
         Nothing ->
-            throwError $ SemanticError $ ("Unexpected return statement " ++
-                                          "outside of function body")
-stmtSem (Stmt_ReturnValue expr) = do
+            throwError $ SErrP pos ("Unexpected return statement " ++
+                                    "outside of function body")
+stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
     rType <- asks envExpectedReturnType
     case rType of
         Just Nothing ->
-            throwError $ SemanticError $ ("Return statement with value " ++
-                                          "in funtion returning nothing")
+            throwError $ SErrP pos ("Return statement with value " ++
+                                    "in funtion returning nothing")
         Just cid -> do
             -- TODO: check cid
             eexe <- exprSem expr
             return $ mkExe $ \_ -> rValue eexe $ \val re -> reReturn re val re
         Nothing ->
-            throwError $ SemanticError $ ("Unexpected return statement " ++
-                                          "outside of function body")
+            throwError $ SErrP pos ("Unexpected return statement " ++
+                                    "outside of function body")
 stmtSem (Stmt_Assert expr) = do
     eexe <- exprSem expr
     return $ mkExe $ \k -> rValue eexe $ \val -> do
@@ -621,7 +624,7 @@ exprSem (Expr_FunCall expr args) = do
     kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argTuples
     let kwargsSet = foldl (\s (n, _) -> S.insert n s) S.empty kwargs
     when ((S.size kwargsSet) /= (length kwargs)) $ do
-        throwError $ SemanticError "Kwarg names not unique"
+        throwError $ SErr "Kwarg names not unique"
     cid <- newCid
     return $ RValue cid $ mkExePt $ \kpt -> do
         rValue exeFn $ \(ValFunction fnImpl) -> do
@@ -636,7 +639,7 @@ exprSem (Expr_FunCall expr args) = do
         fstIsNothing = (== Nothing).fst
         unJustKwarg (Just name, exe) = return (name, exe)
         unJustKwarg (Nothing, _) = do
-            throwError $ SemanticError "Positional arg after kwargs"
+            throwError $ SErr "Positional arg after kwargs"
 
 exprSem expr = notYet expr
 
@@ -697,4 +700,4 @@ declSem :: Decl -> Semantic (Exe ())
 declSem decl = notYet decl
 
 notYet :: Show a => a -> Semantic b
-notYet = throwError.(SemanticError).("not yet: " ++).show
+notYet = throwError.(SErr).("not yet: " ++).show

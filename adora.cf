@@ -14,6 +14,10 @@ layout ":" ;
 -- Lexer - tokens
 
 separator LowerIdent "," ;
+position token Tok_If 'i''f' ;
+position token Tok_Elif 'e''l''i''f' ;
+position token Tok_Else 'e''l''s''e' ;
+position token Tok_Return 'r''e''t''u''r''n' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' (letter | digit | '_')*) ;
@@ -117,11 +121,11 @@ Stmt_Let.           Stmt ::= "let" LowerIdent "=" Expr ;  -- constant
 Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
-Stmt_Return.        Stmt ::= "return" ;
-Stmt_ReturnValue.   Stmt ::= "return" Expr ;
-Stmt_If.            Stmt ::= "if" Expr StatementBlock ;
-Stmt_Elif.          Stmt ::= "elif" Expr StatementBlock ;
-Stmt_Else.          Stmt ::= "else" StatementBlock ;
+Stmt_Return.        Stmt ::= Tok_Return ;
+Stmt_ReturnValue.   Stmt ::= Tok_Return Expr ;
+Stmt_If.            Stmt ::= Tok_If Expr StatementBlock ;
+Stmt_Elif.          Stmt ::= Tok_Elif Expr StatementBlock ;
+Stmt_Else.          Stmt ::= Tok_Else StatementBlock ;
 Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
@@ -155,7 +159,7 @@ _.              Expr0 ::= Expr1 ;
 Expr_Lambda.    Expr0 ::= "fn" FnSignature StatementBlock ;
 
 _.              Expr1 ::= Expr2 ;
-Expr_If.        Expr1 ::= "if" Expr "then" Expr "else" Expr ;
+Expr_If.        Expr1 ::= Tok_If Expr "then" Expr Tok_Else Expr ;
 
 _.              Expr2 ::= Expr3 ;
 Expr_Or.        Expr2 ::= Expr2 "or" Expr3 ;
@@ -203,6 +207,7 @@ _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
 Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
+Expr_TupSubscr. Expr10 ::= Expr10 "." Integer ;  -- tuple subscript
 Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
 Expr_TmplAppl.  Expr10 ::= Expr10 "<!" [Expr] "!>" ;
 Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
