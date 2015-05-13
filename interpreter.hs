@@ -1,5 +1,8 @@
 module Main where
 
+#ifdef USE_HASKELINE
+import System.Console.Haskeline
+#endif
 import System.Environment
 import System.Exit(exitFailure)
 import System.IO
@@ -15,7 +18,7 @@ main = do
     args <- getArgs
     code <- case args of
         [] -> do
-            getContents
+            readStdin
         [programPath] -> do
             readFile programPath
         _ -> do
@@ -32,3 +35,19 @@ main = do
                     hPutStrLn stderr $ showSemError errmsg
                     exitFailure
                 Right runModule -> runModule
+    where
+#ifdef USE_HASKELINE
+        readStdin = do
+            runInputT defaultSettings readLines
+            where
+                readLines :: InputT IO String
+                readLines = do
+                    maybeLine <- getInputLine ">"
+                    case maybeLine of
+                        Nothing -> return ""
+                        Just ln -> do
+                            rest <- readLines
+                            return $ ln ++ "\n" ++ rest
+#else
+        readStdin = getContents
+#endif
