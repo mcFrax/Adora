@@ -6,7 +6,6 @@ import Control.Monad
 import Control.Monad.Error.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
-
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -169,10 +168,10 @@ moduleSem (Module_ stmts) = do
                         structClasses=M.fromList [  -- :: M.Map Cid Impl
                             (fooCid, M.fromList [  -- :: M.Map VarName PropImpl,
                                 ("foo", PropImpl {
-                                    propGetter=(\pt -> mkExeV $ \ke -> ke $ ValInt 666),
-                                    propSetter=(\pt vpt -> mkExe $ \k re mem -> (hPutStrLn stderr $ (++) "foo setter: " $ show $ memGet mem vpt) >> (k () re mem))
+                                    propGetter=(\_pt -> mkExeV $ \ke -> ke $ ValInt 666),
+                                    propSetter=(\_pt vpt -> mkExe $ \k re mem -> (hPutStrLn stderr $ (++) "foo setter: " $ show $ memGet mem vpt) >> (k () re mem))
                                 }),
-                                ("fooThat", mkMth $ \pt -> FunImpl {
+                                ("fooThat", mkMth $ \_pt -> FunImpl {
                                     funDesc=FunSgn {
                                         mthRetType=Just intCid,
                                         mthArgs=[]
@@ -219,9 +218,7 @@ stmtBlockSem (StatementBlock_ stmts) = stmtSeqSem stmts
 
 stmtSeqSem :: [Stmt] -> Semantic (Exe ())
 stmtSeqSem stmts = do
-    outerEnv <- ask
-    hoistedEnv <- return outerEnv  -- TODO: hoisting
-    local (const hoistedEnv) $ stmtSeqSem' stmts
+    hoisted stmts $ stmtSeqSem' stmts
     where
         stmtSeqSem' [] = return noop -- TODO: check return
         stmtSeqSem' (h:t) = do
@@ -258,6 +255,29 @@ stmtSeqSem stmts = do
                 elseSem ([], Just elseBody) = stmtBlockSem elseBody
                 elseSem (((condExpr', bodyBlock'):elifs), maybeElse) = do
                     ifSem condExpr' bodyBlock' (elifs, maybeElse)
+
+hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)  -- wrapped `local`
+hoisted stmts innerSem = do
+    outerEnv <- ask
+    env' <- foldl (\a x -> a >>= (hoistLocStmt x)) (return outerEnv) stmts
+    local (const env') $ do
+        mapM_ hoistGlobStmt stmts
+        innerSem
+    where
+        hoistLocStmt :: Stmt -> LocEnv -> Semantic LocEnv
+        hoistLocStmt stmt beforeEnv = do
+            return beforeEnv
+
+        hoistLocDecl :: Decl -> LocEnv -> Semantic LocEnv
+        hoistLocDecl stmt beforeEnv = do
+            return beforeEnv
+
+        hoistGlobStmt :: Stmt -> Semantic ()  -- updating GlobEnv
+        hoistGlobStmt stmt = do
+            return ()
+        hoistGlobDecl :: Decl -> Semantic ()  -- updating GlobEnv
+        hoistGlobDecl stmt = do
+            return ()
 
 
 data ExprSem = RValue {
@@ -659,7 +679,13 @@ fnSignatureSem (FnSignature_ args _) = do
     return (funSgn, defArgsMap)
     where
         argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe Pointer))
-        argSem (FunDef_Arg_ _ (LowerIdent (_, "_")) defVal) = do
+        argSem (FunDef_Arg_ _ (LowerIdent (pos, "_")) defVal) = do
+            case defVal of
+                MaybeDefaultVal_Some _ -> do
+                    throwError $ SErrP pos ("Unnamed arguments cannot have " ++
+                                            "default value specified (may " ++
+                                            "change in future)")
+                MaybeDefaultVal_None -> return ()
             -- TODO: process type
             return $ (ArgSgn {
                 argName=Nothing,
@@ -694,10 +720,6 @@ intBinopSem op exp1 exp2 = do
         rValue e1exe $ \(ValInt v1) -> do
             rValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
-
-
-declSem :: Decl -> Semantic (Exe ())
-declSem decl = notYet decl
 
 notYet :: Show a => a -> Semantic b
 notYet = throwError.(SErr).("not yet: " ++).show

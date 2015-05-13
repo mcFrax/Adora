@@ -18,9 +18,10 @@ position token Tok_If 'i''f' ;
 position token Tok_Elif 'e''l''i''f' ;
 position token Tok_Else 'e''l''s''e' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
+position token Tok_Null 'n''u''l''l' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
-position token DollarIdent ('$' (letter | digit | '_')*) ;
+position token DollarIdent ('$' letter (letter | digit | '_')*) ;
 
 
 -- -- --
@@ -217,6 +218,7 @@ FunCallArg_Positional. FunCallArg ::= Expr ;
 FunCallArg_Keyword.    FunCallArg ::= LowerIdent "=" Expr ;
 
 _.              Expr11 ::= Expr12 ;
+Expr_Null.      Expr11 ::= Tok_Null ;
 Expr_Char.      Expr11 ::= Char ;
 Expr_String.    Expr11 ::= String ;
 Expr_Double.    Expr11 ::= Double ;

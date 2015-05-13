@@ -1,7 +1,10 @@
 module Types where
 
+import Control.DeepSeq
 import Control.Exception
 import qualified Data.Map.Strict as M
+import System.Exit(exitFailure)
+import System.IO
 
 -- -- --
 -- Environment
@@ -41,6 +44,8 @@ data RunEnv = RunEnv {
     reBreak :: Cont,
     reContinue :: Cont
 }
+
+instance NFData RunEnv
 
 data ClassDesc = ClassDesc {
     className :: String,
@@ -96,15 +101,19 @@ data Memory = Memory {
     memFrames :: M.Map Fid Frame
 } deriving Show
 
+instance NFData Memory
+
 type FrameKey = VarName
 data Frame = Frame {
     frameParentId :: Maybe Fid,
     frameContent :: M.Map FrameKey Pointer  -- frame index -> memory index
 } deriving Show
 
+instance NFData Frame
+
 data Value = ValNull
-           | ValBool { valToBool :: Bool }
            | ValFunction FunImpl
+           | ValBool { valToBool :: Bool }
            | ValInt { valToInt :: Int }
            | ValChar { valToChar :: Char }
            | ValObject {
@@ -112,8 +121,20 @@ data Value = ValNull
                 valObjAttrs :: M.Map VarName Pointer
              } deriving Show
 
+instance NFData Value where
+    rnf ValNull = ()
+    rnf (ValFunction _) = ()
+    rnf (ValBool b) = (ValBool $! b) `seq` ()
+    rnf (ValInt i) = (ValInt $! i) `seq` ()
+    rnf (ValChar c) = (ValChar $! c) `seq` ()
+    rnf (ValObject sid attrs) = ((ValObject $! sid) $!! attrs) `seq` ()
+
 objStruct :: Value -> RunEnv -> StructDesc
 objStruct objVal re = (reStructs re) M.! (valObjStruct objVal)
+
+
+class Eval e where
+    eval :: e -> IO e
 
 
 -- -- --
@@ -127,16 +148,20 @@ newtype Exe a = Exe {
     exec :: SemiCont a
 }
 
-mkExe :: SemiCont a -> Exe a
+mkExe :: (NFData a) => SemiCont a -> Exe a
 mkExe exe = do
-    Exe $ \ka -> exe $ \a re mem -> do
-        _ <- evaluate a
-        _ <- evaluate re
-        _ <- evaluate $ memFid mem
-        _ <- evaluate $ memValues mem
-        _ <- evaluate $ memFrames mem
---         putStrLn $ show mem
-        ka a re mem
+    Exe $!! \ka -> exe $!! \a re mem -> do
+        (a', re', mem') <- handle handler $ do
+            a' <- evaluate $!! a
+            re' <- evaluate $!! re
+            mem' <- evaluate $!! mem
+            return (a', re', mem')
+        ka a' re' mem'
+    where
+        handler :: SomeException -> IO a
+        handler exception = do
+            hPutStrLn stderr $ "Runtime exception: " ++ (show exception)
+            exitFailure
 
 runExe :: Exe a -> Cont
 runExe exe = exec exe (\_ _ _ -> return ())

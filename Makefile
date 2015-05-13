@@ -18,7 +18,7 @@ Testadora: $(ParserObjects)
 
 $(ParserObjects): %.o: %.hs $(ParserHs)
 	@# bnfc generated files  - compiled without -Wall and -Werror
-	ghc $(CommonGHCFlags) --make "$<"
+	ghc $(CommonGHCFlags) -w --make "$<"
 
 Lexadora.hs: Lexadora.x
 	alex -g Lexadora.x
