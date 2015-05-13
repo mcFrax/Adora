@@ -147,7 +147,7 @@ moduleSem (Module_ stmts) = do
                         ],
                         classMths=M.fromList [
                             ("fooThat", FunSgn {
-                                mthRetType=intCid,
+                                mthRetType=Just intCid,
                                 mthArgs=[
                                     ArgSgn {
                                         argName=Nothing,
@@ -171,7 +171,7 @@ moduleSem (Module_ stmts) = do
                                 }),
                                 ("fooThat", mkMth $ \pt -> FunImpl {
                                     funDesc=FunSgn {
-                                        mthRetType=intCid,
+                                        mthRetType=Just intCid,
                                         mthArgs=[]
                                     },
                                     funBody=(\args -> mkExeV $ \ke re mem -> (hPutStrLn stderr $ (++) "fooThat: " $ show $ map fst args) >> (ke (ValInt 555) re mem))
@@ -365,12 +365,42 @@ stmtSem (Stmt_While condExpr block) = do
         fix :: (a -> a) -> a
         fix f = f $ fix f
 
-stmtSem Stmt_Break = return $ mkExe $ \_ re -> reBreak re re
-stmtSem Stmt_Continue = return $ mkExe $ \_ re -> reContinue re re
-stmtSem Stmt_Return = return $ mkExe $ \_ re -> reReturn re ValNull re
+stmtSem Stmt_Break = do
+    insideLoop <- asks envInsideLoop
+    if insideLoop then
+        return $ mkExe $ \_ re -> reBreak re re
+    else
+        throwError $ SemanticError $ "Unexpected break statement"
+stmtSem Stmt_Continue = do
+    insideLoop <- asks envInsideLoop
+    if insideLoop then
+        return $ mkExe $ \_ re -> reContinue re re
+    else
+        throwError $ SemanticError $ "Unexpected continue statement"
+stmtSem Stmt_Return = do
+    rType <- asks envExpectedReturnType
+    case rType of
+        Just Nothing ->
+            return $ mkExe $ \_ re -> reReturn re ValNull re
+        Just cid ->
+            throwError $ SemanticError $ ("Return statement without value " ++
+                                          "in funtion with return type")
+        Nothing ->
+            throwError $ SemanticError $ ("Unexpected return statement " ++
+                                          "outside of function body")
 stmtSem (Stmt_ReturnValue expr) = do
-    eexe <- exprSem expr
-    return $ mkExe $ \_ -> rValue eexe $ \val re -> reReturn re val re
+    rType <- asks envExpectedReturnType
+    case rType of
+        Just Nothing ->
+            throwError $ SemanticError $ ("Return statement with value " ++
+                                          "in funtion returning nothing")
+        Just cid -> do
+            -- TODO: check cid
+            eexe <- exprSem expr
+            return $ mkExe $ \_ -> rValue eexe $ \val re -> reReturn re val re
+        Nothing ->
+            throwError $ SemanticError $ ("Unexpected return statement " ++
+                                          "outside of function body")
 stmtSem (Stmt_Assert expr) = do
     eexe <- exprSem expr
     return $ mkExe $ \k -> rValue eexe $ \val -> do
@@ -465,7 +495,11 @@ exprSem (Expr_Minus expr) = do
 
 exprSem (Expr_Lambda signature block) = do
     (fnSgn, defArgs) <- fnSignatureSem signature
-    exeBody <- local (\e -> e{envInsideLoop=False}) $ stmtBlockSem block
+    let makeInEnv outEnv = outEnv{
+        envExpectedReturnType=Just $ mthRetType fnSgn,
+        envInsideLoop=False
+    }
+    exeBody <- local makeInEnv $ stmtBlockSem block
     cid <- newCid
     let exeFunction closureFid argTuples = do
         mkExeV $ \ke re0 mem0 -> let
@@ -538,7 +572,7 @@ exprSem (Expr_TypeName (UpperIdent (_, typeName))) = do
 
     return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl {
         funDesc=FunSgn {
-            mthRetType=strCid,
+            mthRetType=Just strCid,
             mthArgs=[]
         },
         funBody=exeCtor
@@ -615,7 +649,7 @@ fnSignatureSem (FnSignature_ args _) = do
     -- OptResultType_Some. OptResultType ::= "->" TypeExpr;
     -- TODO: check that args have unique names
     let funSgn = FunSgn {
-        mthRetType=undefined,
+        mthRetType=Nothing,
         mthArgs=(map fst argTuples)
     }
     let defArgsMap = foldl argToMap M.empty argTuples

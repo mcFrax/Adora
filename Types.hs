@@ -26,7 +26,7 @@ data LocEnv = LocEnv {
     envVars :: M.Map VarName VarType,
     envClasses :: M.Map VarName Cid,
     envStructs :: M.Map VarName Sid,
-    envExpectedReturnType :: Maybe Cid,
+    envExpectedReturnType :: Maybe (Maybe Cid),
     envInsideLoop :: Bool -- whether break and continue are legal
 } deriving Show
 
@@ -49,7 +49,7 @@ data ClassDesc = ClassDesc {
 } deriving Show
 
 data FunSgn = FunSgn {
-    mthRetType :: Cid,
+    mthRetType :: Maybe Cid,
     mthArgs :: [ArgSgn]
 } deriving (Eq, Ord, Show)
 
