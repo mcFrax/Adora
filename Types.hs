@@ -6,6 +6,8 @@ import qualified Data.Map.Strict as M
 import System.Exit(exitFailure)
 import System.IO
 
+import Absadora
+
 -- -- --
 -- Environment
 -- -- --
@@ -13,7 +15,9 @@ import System.IO
 type VarName = String
 data VarType = VarType {
     varMutable :: Bool,
-    varClass :: Cid
+    -- varInitialized :: Bool, --TODO
+    varClass :: Cid,
+    varDefPos :: Maybe (Int, Int)
 } deriving Show
 
 type Cid = Int -- class id
@@ -46,11 +50,14 @@ data RunEnv = RunEnv {
 }
 
 instance NFData RunEnv
+-- TODO?
 
 data ClassDesc = ClassDesc {
     className :: String,
     classProps :: M.Map VarName VarType,
     classMths :: M.Map VarName FunSgn
+} | ClassDescIncomplete {
+    classDecl :: (Decl, LocEnv)
 } deriving Show
 
 data FunSgn = FunSgn {
@@ -68,6 +75,8 @@ data StructDesc = StructDesc {
     structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl
+} | StructDescIncomplete {
+    structDecl :: (Decl, LocEnv)
 } deriving Show
 
 type Impl = M.Map VarName PropImpl  -- both props and mths
@@ -102,14 +111,13 @@ data Memory = Memory {
 } deriving Show
 
 instance NFData Memory
+-- TODO?
 
 type FrameKey = VarName
 data Frame = Frame {
     frameParentId :: Maybe Fid,
     frameContent :: M.Map FrameKey Pointer  -- frame index -> memory index
 } deriving Show
-
-instance NFData Frame
 
 data Value = ValNull
            | ValFunction FunImpl

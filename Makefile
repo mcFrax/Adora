@@ -40,7 +40,7 @@ $(BnfcFiles): $(Langname).cf
 	touch $(BnfcFiles)  # tell `make` these files are up to date
 
 franciszek_boehlke.zip: $(patsubst %,franciszek_boehlke/%,README.pdf adora.cf Makefile $(Examples) $(OtherHs))
-	tar -lzip -cf franciszek_boehlke.zip franciszek_boehlke
+	tar -acf franciszek_boehlke.zip franciszek_boehlke
 
 franciszek_boehlke/README.pdf: adora.pdf
 	mkdir -p $$(dirname "$@")

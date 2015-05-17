@@ -93,10 +93,13 @@ data SErr = SErr String
 instance Error SErr where
   strMsg = SErr
 
+showPos :: (Int, Int) -> String
+showPos (ln, col) = (show ln) ++ ":" ++ (show col)
+
 showSemError :: SErr -> String
 showSemError (SErr s) = "?:?: error: " ++ s
-showSemError (SErrP (ln, col) s) = do
-    (show ln) ++ ":" ++ (show col) ++ ": error: " ++ s
+showSemError (SErrP pos s) = do
+     (showPos pos) ++ ": error: " ++ s
 
 boolCid :: Cid
 boolCid = 0-1
@@ -144,7 +147,8 @@ moduleSem (Module_ stmts) = do
                         classProps=M.fromList [
                             ("foo", VarType {
                                 varMutable=True,
-                                varClass=intCid
+                                varClass=intCid,
+                                varDefPos=Nothing
                             })
                         ],
                         classMths=M.fromList [
@@ -259,26 +263,111 @@ stmtSeqSem stmts = do
 hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)  -- wrapped `local`
 hoisted stmts innerSem = do
     outerEnv <- ask
-    env' <- foldl (\a x -> a >>= (hoistLocStmt x)) (return outerEnv) stmts
-    local (const env') $ do
-        mapM_ hoistGlobStmt stmts
-        innerSem
+    (env', compileHoisted) <- foldl foldStmt (initFold outerEnv) stmts
+    compileHoisted env'
+    local (const env') $ innerSem
     where
-        hoistLocStmt :: Stmt -> LocEnv -> Semantic LocEnv
-        hoistLocStmt stmt beforeEnv = do
-            return beforeEnv
+        foldStmt hoistPrev stmt = do
+            intermediate <- hoistPrev
+            hoistLocStmt intermediate stmt
+        initFold outerEnv = return (outerEnv, const $ return ())
+        hoistLocStmt :: (LocEnv, LocEnv -> (Semantic ())) -> Stmt ->
+            Semantic (LocEnv, LocEnv -> (Semantic ()))
+        hoistLocStmt beforeEnv_compilePrev (Stmt_Let ident _expr) = do
+            hoistVar False ident  beforeEnv_compilePrev
+        hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_LetTuple {}) = do
+            notYet $ "hoistLocStmt (Stmt_LetTuple ..)"
+        hoistLocStmt beforeEnv_compilePrev (Stmt_Var ident _expr) = do
+            hoistVar True ident beforeEnv_compilePrev
+        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeAliasDefinition ident typeExpr)) = do
+            let UpperIdent (pos, aliasName) = ident
+            let (classes, structs) = (envClasses beforeEnv, envStructs beforeEnv)
+            typeSem <- exprSem typeExpr
+            assertIsTypeValue typeSem
+            (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
+                Just (Left cid) -> do
+                    when (isJust $ M.lookup aliasName classes) $
+                        throwError $ SErrP pos $ (
+                            "Class `" ++ aliasName ++ "' already exists")
+                    return (True, M.insert aliasName cid classes)
+                Just (Right ctid) -> do
+                    notYet "Just (Right ctid)"
+                Nothing -> return (False, classes)
+            (strFound, structs') <- case expStr typeSem of
+                Just (Left sid) -> do
+                    when (isJust $ M.lookup aliasName structs) $
+                        throwError $ SErrP pos $ (
+                            "Struct `" ++ aliasName ++ "' already exists")
+                    return (True, M.insert aliasName sid structs)
+                Just (Right stid) -> do
+                    notYet "Just (Right stid)"
+                Nothing -> return (False, structs)
+            when (not $ clsFound || strFound) $ do
+                error "not $ clsFound || strFound"
+            return (beforeEnv{
+                    envClasses=classes',
+                    envStructs=structs'
+                }, compilePrev)
 
-        hoistLocDecl :: Decl -> LocEnv -> Semantic LocEnv
-        hoistLocDecl stmt beforeEnv = do
-            return beforeEnv
+        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
+            let (TypeDefinition_Class ident mTmplSgn superClsExprs variants decls) = clsDef
+            let UpperIdent (pos, clsName) = ident
+            let classes = envClasses beforeEnv
+            when (isJust $ M.lookup clsName classes) $
+                throwError $ SErrP pos ("Class `" ++ clsName ++ "' already defined")
+            case mTmplSgn of
+                MaybeTemplateSgn_None -> do
+                    return ()  -- TODO?
+                MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
+            superClses <- mapM exprSem superClsExprs
+            cid <- newCid
+            mapM_ assertIsTypeValue superClses
+            return (beforeEnv{envClasses=M.insert clsName cid classes},
+                    compilePrev)
+        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeDefinition_ClassStruct {})) = do
+            notYet "TypeDefinition_ClassStruct"
+        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeDefinition_Struct {})) = do
+            notYet "TTTTTTTTTHHHHHHHHHIIIIIIIIISSSSSSSSSSSSSIIIIIIIIISSSSSSSSSSNNNNNNEXT"
+        hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_Decl _) = do
+            error "FOooo" --TODO?
+            -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
+            -- MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
+            -- ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
+            -- FieldDefinition.            Decl0 ::= Expr9 LowerIdent MaybeDefaultVal ;
+            -- PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" [PropDeclClause] "}" ;
+            -- TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
+            -- MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
+            -- TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+            -- TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
+            -- TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
+        hoistLocStmt (beforeEnv, compilePrev) _stmt = return (beforeEnv, compilePrev)
+
+        hoistVar :: Bool -> LowerIdent -> (LocEnv, LocEnv -> (Semantic ())) -> Semantic (LocEnv, LocEnv -> (Semantic ()))
+        hoistVar mutable (LowerIdent (pos, varName)) (beforeEnv, compilePrev) = do
+            cid <- newCid
+            let vars = envVars beforeEnv
+            case M.lookup varName vars of
+                Just var -> do
+                    let msg = "variable redefined: `" ++ varName ++ "'"
+                    throwError $ SErrP pos $ case varDefPos var of
+                        Just pos' -> do
+                            msg ++ "'\nPreviously defined at " ++ (showPos pos')
+                        Nothing -> msg
+                Nothing -> do
+                    let var = VarType {
+                        varClass=cid,
+                        varMutable=mutable,
+                        varDefPos=Just pos
+                    }
+                    return (beforeEnv{envVars=M.insert varName var vars},
+                            compilePrev)
 
         hoistGlobStmt :: Stmt -> Semantic ()  -- updating GlobEnv
-        hoistGlobStmt stmt = do
+        hoistGlobStmt (Stmt_Decl decl) = do
+            error "FOoooO"
+        hoistGlobStmt _stmt = do
+            -- TODO
             return ()
-        hoistGlobDecl :: Decl -> Semantic ()  -- updating GlobEnv
-        hoistGlobDecl stmt = do
-            return ()
-
 
 data ExprSem = RValue {
                 expCid :: Cid,
@@ -291,7 +380,7 @@ data ExprSem = RValue {
                 expCid :: Cid,
                 expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
                 expCls :: Maybe (Either Cid CTid),
-                expStr :: Maybe (Either Cid CTid)
+                expStr :: Maybe (Either Sid STid)
             }
 
 rValue :: ExprSem -> SemiCont Value
@@ -318,6 +407,14 @@ mkExeV = (Left).mkExe
 
 mkExePt :: SemiCont Pointer -> Either (Exe Value) (Exe Pointer)
 mkExePt = (Right).mkExe
+
+assertIsTypeValue :: ExprSem -> Semantic ()
+assertIsTypeValue (TypeValue {}) = return ()
+assertIsTypeValue _ = do
+    throwError $ SErr "not a proper type name"
+--     TODO:
+--     throwError $ SErrP pos ("`" ++ (printTree typeExpr) ++
+--                             "' is not a proper type name")
 
 isTruthy :: Value -> Bool
 isTruthy = valToBool

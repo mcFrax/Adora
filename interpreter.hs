@@ -42,7 +42,7 @@ main = do
             where
                 readLines :: InputT IO String
                 readLines = do
-                    maybeLine <- getInputLine ">"
+                    maybeLine <- getInputLine "> "
                     case maybeLine of
                         Nothing -> return ""
                         Just ln -> do
