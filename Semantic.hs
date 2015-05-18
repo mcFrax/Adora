@@ -310,7 +310,7 @@ hoisted stmts innerSem = do
                 }, compilePrev)
 
         hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
-            let (TypeDefinition_Class ident mTmplSgn superClsExprs variants decls) = clsDef
+            let (TypeDefinition_Class ident mTmplSgn superClsExprs _variants _decls) = clsDef
             let UpperIdent (pos, clsName) = ident
             let classes = envClasses beforeEnv
             when (isJust $ M.lookup clsName classes) $
@@ -326,8 +326,22 @@ hoisted stmts innerSem = do
                     compilePrev)
         hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeDefinition_ClassStruct {})) = do
             notYet "TypeDefinition_ClassStruct"
-        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeDefinition_Struct {})) = do
-            notYet "TTTTTTTTTHHHHHHHHHIIIIIIIIISSSSSSSSSSSSSIIIIIIIIISSSSSSSSSSNNNNNNEXT"
+        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
+            let (TypeDefinition_Struct ident mTmplSgn superStrExprs decls) = strDef
+            let UpperIdent (pos, strName) = ident
+            let classes = envClasses beforeEnv
+            let structs = envStructs beforeEnv
+            when (isJust $ M.lookup strName structs) $
+                throwError $ SErrP pos ("Class `" ++ strName ++ "' already defined")
+            case mTmplSgn of
+                MaybeTemplateSgn_None -> do
+                    return ()  -- TODO?
+                MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
+            superStrs <- mapM exprSem superStrExprs
+            cid <- newCid
+            mapM_ assertIsTypeValue superStrs
+            return (beforeEnv{envStructs=M.insert strName cid structs},
+                    compilePrev)
         hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_Decl _) = do
             error "FOooo" --TODO?
             -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
