@@ -12,6 +12,7 @@
 *.tex
 
 Docadora.txt
+Docadora.pdf
 Absadora.hs
 Layoutadora.hs
 Lexadora.hs
@@ -26,9 +27,10 @@ adora.html
 adora.pdf
 Testadora
 interpreter
+parselib
 
 franciszek_boehlke
 franciszek_boehlke.zip
+
 .adora-history
 StdLib.hs
-parselib

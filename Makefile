@@ -3,7 +3,7 @@ ParserHsPrefixes := Abs Layout Lex Par Print Skel
 ParserHs := $(addsuffix $(Langname).hs,$(ParserHsPrefixes))
 ParserObjects := $(patsubst %.hs,%.o,$(ParserHs))
 SourceHs := $(filter-out $(ParserHs) StdLib.hs Testadora.hs,$(wildcard *.hs))
-BnfcFiles := $(subst __,$(Langname),Lex__.x Par__.y Doc__.tex Abs__.hs Print__.hs Layout__.hs Test__.hs Skel__.hs)
+BnfcFiles := $(subst __,$(Langname),Lex__.x Par__.y Doc__.tex Doc__.txt Abs__.hs Print__.hs Layout__.hs Test__.hs Skel__.hs)
 Examples := $(wildcard good/*.adora) $(wildcard bad/*.adora)
 CommonGHCFlags := -cpp -O2 -DUSE_HASKELINE
 
@@ -32,14 +32,14 @@ Lexadora.hs: Lexadora.x
 Paradora.hs: Paradora.y
 	happy -gcai Paradora.y
 
-Docadora.ps: Docadora.tex
-	latex Docadora.tex; dvips Docadora.dvi -o Docadora.ps
+Docadora.pdf: %.pdf: %.tex
+	- pdflatex "$<"
 
-adora.pdf: adora.html
-	wkhtmltopdf --title 'Adora README (Franciszek Boehlke)' adora.html adora.pdf
+adora.pdf: %.pdf: %.html
+	wkhtmltopdf --title 'Adora README (Franciszek Boehlke)' "$<" "$@"
 
-adora.html: adora.md
-	pandoc -s -S "$^" -o "$@" --css=github.css --self-contained --highlight-style=kate
+adora.html: adora.md github.css
+	pandoc -s -S "$<" -o "$@" --css=github.css --self-contained --highlight-style=kate
 
 $(BnfcFiles): $(Langname).cf
 	bnfc -haskell adora.cf >/dev/null
@@ -67,10 +67,12 @@ test_students: franciszek_boehlke.zip students_test_script.sh
 	ssh fb320589@students.mimuw.edu.pl < students_test_script.sh
 
 clean:
-	-rm -f *.log *.aux *.hi *.o *.dvi *.x *.y
-	-rm -f Docadora.ps adora.html adora.pdf
-	-rm -rf parselib StdLib.hs
-	-rm -rf franciszek_boehlke franciszek_boehlke.zip
+	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y
+	-rm -f adora.html adora.pdf Docadora.pdf
+	-rm -f parselib StdLib.hs
+	-rm -rf franciszek_boehlke
 
 distclean: clean
-	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* Testadora ErrM.* SharedString.* adora.dtd XMLadora.*
+	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* ErrM.* SharedString.* adora.dtd XMLadora.*
+	-rm -f interpreter Testadora
+	-rm -rf franciszek_boehlke.zip
