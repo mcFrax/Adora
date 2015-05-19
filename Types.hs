@@ -74,9 +74,8 @@ data ArgSgn = ArgSgn {
 data StructDesc = StructDesc {
     structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
-    structClasses :: M.Map Cid Impl
-} | StructDescIncomplete {
-    structDecl :: (Decl, LocEnv)
+    structClasses :: M.Map Cid Impl,
+    structCtor :: FunImpl
 } deriving Show
 
 type Impl = M.Map VarName PropImpl  -- both props and mths
@@ -180,3 +179,18 @@ io ioOp ka re mem = do
 
 noop :: Exe ()
 noop = mkExe ($ ())
+
+
+data ExprSem = RValue {
+                expCid :: Cid,
+                expRValue :: Either (Exe Value) (Exe Pointer)
+            } | LValue {
+                expCid :: Cid,
+                expRValue :: Either (Exe Value) (Exe Pointer),
+                setLValue :: Pointer -> Exe ()
+            } | TypeValue {
+                expCid :: Cid,
+                expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
+                expCls :: Maybe (Either Cid CTid),
+                expStr :: Maybe (Either Sid STid)
+            }

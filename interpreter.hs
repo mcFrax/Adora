@@ -1,7 +1,9 @@
 module Main where
 
 #ifdef USE_HASKELINE
+import Control.Monad
 import System.Console.Haskeline
+import System.FilePath
 #endif
 import System.Environment
 import System.Exit(exitFailure)
@@ -38,7 +40,9 @@ main = do
     where
 #ifdef USE_HASKELINE
         readStdin = do
-            runInputT defaultSettings readLines
+            histfile <- do
+                liftM (`replaceFileName` ".adora-history") getExecutablePath
+            runInputT defaultSettings{historyFile=Just histfile} readLines
             where
                 readLines :: InputT IO String
                 readLines = do

@@ -16,6 +16,7 @@ import System.IO
 import Absadora
 import Printadora(printTree)
 
+import ExprExe
 import Memory
 import Types
 
@@ -109,26 +110,15 @@ showSemError (SErr s) = "?:?: error: " ++ s
 showSemError (SErrP pos s) = do
      (showPos pos) ++ ": error: " ++ s
 
-boolCid :: Cid
-boolCid = 0-1
-
-intCid :: Cid
-intCid = 0-2
-
-doubleCid :: Cid
-doubleCid = 0-3
-
-charCid :: Cid
-charCid = 0-4
-
-typeCid :: Cid
-typeCid = 0-5
-
-voidCid :: Cid
-voidCid = 0-100
-
-fooCid :: Cid
-fooCid = 123
+stdClss :: M.Map String Cid
+stdClss = M.fromList [
+        ("Bool", 0-1),
+        ("Int", 0-2),
+        ("Double", 0-3),
+        ("Char", 0-4),
+        ("Type", 0-5),
+        ("Void", 0-100)
+    ]
 
 mkMth :: (Pointer -> FunImpl) -> PropImpl
 mkMth mth = PropImpl {
@@ -149,47 +139,8 @@ moduleSem (Module_ stmts) = do
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
-                globClasses=M.fromList [
-                    (fooCid, ClassDesc {
-                        className="Foo",
-                        classProps=M.fromList [
-                            ("foo", VarType {
-                                varMutable=True,
-                                varClass=intCid,
-                                varDefPos=Nothing
-                            })
-                        ],
-                        classMths=M.fromList [
-                            ("fooThat", FunSgn {
-                                mthRetType=Just intCid,
-                                mthArgs=[
-                                    ArgSgn {
-                                        argName=Nothing,
-                                        argType=intCid,
-                                        argHasDefault=False
-                                    }
-                                ]
-                            })
-                        ]
-                    })
-                ],
-                globStructs=M.fromList [
-                    (fooCid, StructDesc {
-                        structCid=fooCid,
-                        structAttrs=M.empty,  -- :: M.Map VarName Cid,
-                        structClasses=M.fromList [  -- :: M.Map Cid Impl
-                            (fooCid, M.fromList [  -- :: M.Map VarName PropImpl,
-                                ("foo", PropImpl {
-                                    propGetter=(\_pt -> mkExeV $ \ke -> ke $ ValInt 666),
-                                    propSetter=(\_pt vpt -> mkExe $ \k re mem -> (hPutStrLn stderr $ (++) "foo setter: " $ show $ memGet mem vpt) >> (k () re mem))
-                                }),
-                                ("fooThat", mkMth $ \_pt -> FunImpl (\args ->
-                                    mkExeV $ \ke re mem -> (hPutStrLn stderr $ (++) "fooThat: " $ show $ map fst args) >> (ke (ValInt 555) re mem))
-                                )
-                            ])
-                        ]
-                    })
-                ]
+                globClasses=M.empty,
+                globStructs=M.empty
             },
             sstStructTmpls=(M.empty, M.empty),
             sstClassTmpls=(M.empty, M.empty),
@@ -202,12 +153,8 @@ moduleSem (Module_ stmts) = do
         outerEnv = LocEnv {
             envSuper=Nothing,
             envVars=M.fromList [],
-            envClasses=M.fromList [
-                ("Foo", fooCid)
-            ],
-            envStructs=M.fromList [
-                ("Foo", fooCid)
-            ],
+            envClasses=stdClss,
+            envStructs=M.empty,
             envExpectedReturnType=Nothing,
             envInsideLoop=False
         }
@@ -287,8 +234,7 @@ hoisted stmts innerSem = do
         hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeAliasDefinition ident typeExpr)) = do
             let UpperIdent (pos, aliasName) = ident
             let (classes, structs) = (envClasses beforeEnv, envStructs beforeEnv)
-            typeSem <- exprSem typeExpr
-            assertIsTypeValue typeSem
+            typeSem <- typeExprSem typeExpr
             (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
                 Just (Left cid) -> do
                     when (isJust $ M.lookup aliasName classes) $
@@ -324,13 +270,12 @@ hoisted stmts innerSem = do
                 MaybeTemplateSgn_None -> do
                     return ()  -- TODO?
                 MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
-            superClses <- mapM (\(SuperType_ t) -> exprSem t) superClsExprs
+            _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
             cid <- newCid
-            mapM_ assertIsTypeValue superClses
             return (beforeEnv{envClasses=M.insert clsName cid classes},
                     compilePrev)
         hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
-            let (TypeDefinition_Struct ident mTmplSgn superStrExprs _decls) = strDef
+            let (TypeDefinition_Struct ident mTmplSgn superStrExprs decls) = strDef
             let UpperIdent (pos, strName) = ident
             let classes = envClasses beforeEnv
             let structs = envStructs beforeEnv
@@ -342,18 +287,70 @@ hoisted stmts innerSem = do
                 MaybeTemplateSgn_None -> do
                     return ()  -- TODO?
                 MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
-            superStrs <- mapM (\(SuperType_ t) -> exprSem t) superStrExprs
+            _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
             cid <- newCid
             sid <- newSid
-            mapM_ assertIsTypeValue superStrs
+            attrs <- hoistAttrs decls
+            impls <- hoistImpls decls
             let
+                struct = StructDesc {
+                    structCid=cid,
+                    structAttrs=attrs,
+                    structClasses=impls,
+                    structCtor=FunImpl $ constructor
+                }
+                constructor argTuples = do
+                    mkExePt $ \kpt re mem -> let
+                        exe = mkCall ctorSgn M.empty exeCtorBody (0-1) argTuples
+                        in exec exe (\(ValInt pt) -> kpt pt) re mem
+                ctorSgn = FunSgn {
+                    mthRetType=Just cid,
+                    mthArgs=map attrToArg $ M.toList attrs
+                }
+                attrToArg (attrName, attrCid) = ArgSgn {
+                    argName=Just attrName,
+                    argType=attrCid,
+                    argHasDefault=False  -- TODO?
+                }
+                exeCtorBody = mkExe $ \_ re mem -> let
+                    vars = frameContent $ memFrame mem
+                    mem' = allocVar "self" ValObject {
+                            valObjStruct=sid,
+                            valObjAttrs=M.intersection vars attrs
+                        } mem
+                    -- TODO: execute custom contructor body/init method?
+                    pt = (getVarPt "self" mem')
+                    in (reReturn re) (ValInt pt) re mem'
                 compile env = do
                     compilePrev env
-                    -- TODO ???
+                    glob <- gets sstGlob
+                    let glob' = glob{
+                            globStructs=M.insert sid struct $ globStructs glob
+                        }
+                    modify $ \sst -> sst{sstGlob=glob'}
+
             return (beforeEnv{
                         envStructs=M.insert strName sid structs,
                         envClasses=M.insert strName cid classes
                     }, compile)
+            where
+                hoistAttrs decls = do
+                    attrs <- sequence $ do
+                        decl <- decls
+                        case decl of
+                            (FieldDefinition typeExpr
+                                             (LowerIdent (pos, name))
+                                             _maybeDefault) -> return $ do
+                                typeSem <- typeExprSem typeExpr
+                                cid <- case expCls typeSem of
+                                    Just (Left cid) -> return cid
+                                    _ -> throwError $ SErrP pos (
+                                            "typeExpr without cid?")
+                                return (name, cid)
+                            _ -> []
+                    -- TODO check integrity
+                    return $ M.fromList attrs
+                hoistImpls _decls = return M.empty
         hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_Decl _) = do
             error "FOooo" --TODO?
             -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
@@ -388,57 +385,16 @@ hoisted stmts innerSem = do
                     return (beforeEnv{envVars=M.insert varName var vars},
                             compilePrev)
 
-data ExprSem = RValue {
-                expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer)
-            } | LValue {
-                expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer),
-                setLValue :: Pointer -> Exe ()
-            } | TypeValue {
-                expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
-                expCls :: Maybe (Either Cid CTid),
-                expStr :: Maybe (Either Sid STid)
-            }
 
-rValue :: ExprSem -> SemiCont Value
-rValue = execV.expRValue
 
-rValuePt :: ExprSem -> SemiCont Pointer
-rValuePt = execPt.expRValue
-
-execV :: Either (Exe Value) (Exe Pointer) -> SemiCont Value
-execV (Left exeVal) = exec exeVal
-execV (Right exePt) = \ke -> do
-    exec exePt $ \pt re mem -> do
-        ke (memGet mem pt) re mem
-
-execPt :: Either (Exe Value) (Exe Pointer) -> SemiCont Pointer
-execPt (Left exeVal) = \kpt -> do
-    exec exeVal $ \val re mem -> do
-        let (pt, mem') = alloc val mem
-        kpt pt re mem'
-execPt (Right exePt) = exec exePt
-
-mkExeV :: SemiCont Value -> Either (Exe Value) (Exe Pointer)
-mkExeV = (Left).mkExe
-
-mkExePt :: SemiCont Pointer -> Either (Exe Value) (Exe Pointer)
-mkExePt = (Right).mkExe
-
-assertIsTypeValue :: ExprSem -> Semantic ()
-assertIsTypeValue (TypeValue {}) = return ()
-assertIsTypeValue _ = do
-    throwError $ SErr "not a proper type name"
---     TODO:
---     throwError $ SErrP pos ("`" ++ (printTree typeExpr) ++
---                             "' is not a proper type name")
-
-isTruthy :: Value -> Bool
-isTruthy = valToBool
--- TODO: isTruthy for other values
-
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+--                  __            __  _____                                   --
+--            _____/ /_____ ___  / /_/ ___/___  ____ ___                      --
+--           / ___/ __/ __ `__ \/ __/\__ \/ _ \/ __ `__ \                     --
+--          (__  ) /_/ / / / / / /_ ___/ /  __/ / / / / /                     --
+--         /____/\__/_/ /_/ /_/\__//____/\___/_/ /_/ /_/                      --
+--                                                                            --
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
 stmtSem :: Stmt -> Semantic (Exe ())
@@ -558,29 +514,49 @@ stmtSem (Stmt_Assert expr) = do
 stmtSem stmt = notYet stmt
 
 
+
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+--                                 _____                                      --
+--           ___  _  ______  _____/ ___/___  ____ ___                         --
+--          / _ \| |/_/ __ \/ ___/\__ \/ _ \/ __ `__ \                        --
+--         /  __/>  </ /_/ / /   ___/ /  __/ / / / / /                        --
+--         \___/_/|_/ .___/_/   /____/\___/_/ /_/ /_/                         --
+--                 /_/                                                        --
+--                                                                            --
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
+
+typeExprSem :: Expr -> Semantic ExprSem
+typeExprSem typeExpr = do
+    sem <- exprSem typeExpr
+    case sem of
+        TypeValue {} -> return sem
+        _ -> throwError $ SErr{-P pos-} ("`" ++ (printTree typeExpr) ++
+                                         "' is not a proper type name")
+
 exprSem :: Expr -> Semantic ExprSem
-exprSem (Expr_Char c) = return $ RValue charCid $ mkExeV ($ ValChar c)
+exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExeV ($ ValChar c)
 -- exprSem (Expr_String c) _ =
 -- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
-exprSem (Expr_Int i) = return $ RValue intCid $ mkExeV ($ ValInt $ fromInteger i)
+exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExeV ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (_, varName))) = do
     -- TODO: check env
-    let cid = intCid -- TODO TODO TODO
+    let cid = (stdClss M.! "Int") -- TODO TODO TODO
         exeGet = mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
         exeSet pt = mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
     return $ LValue cid exeGet exeSet
 
 exprSem (Expr_Not expr) = do
     exee <- exprSem expr
-    return $ RValue boolCid $ mkExeV $ \ke -> do
+    return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
         rValue exee $ \(ValBool bval) -> do
             ke $ ValBool $ not bval
 
 exprSem expr@(Expr_RelOper {}) = do
     sem' <- exprSem' expr
-    return $ RValue boolCid $ mkExeV $ \ke -> do
+    return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
         exec sem' $ \maybeVal -> do
             ke $ ValBool $ isJust maybeVal
     where
@@ -614,7 +590,7 @@ exprSem expr@(Expr_RelOper {}) = do
 --     exprSem' (Expr_RelOper exp1 oper exp2)
 --     e1exe <- exprSem exp1
 --     e2exe <- exprSem exp2
---     return $ RValue boolCid $ mkExeV $ \ke -> do
+--     return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
 --         rValue e1exe $ \(ValInt v1) -> do
 --             rValue e2exe $ \(ValInt v2) -> do
 --                 ke (ValBool $ operFun v1 v2)
@@ -640,79 +616,35 @@ exprSem (Expr_Lambda signature block) = do
     }
     exeBody <- local makeInEnv $ stmtBlockSem block
     cid <- newCid
-    let exeFunction closureFid argTuples = do
-        mkExeV $ \ke re0 mem0 -> let
-            doReturn val re mem = ke val re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
-            re1 = re0{reReturn=doReturn}
-            (fid, mem1) = allocFrame closureFid mem0
-
-            exeArgs :: Exe ()
-            (exeArgs, defSgns) = foldl foldArg (noop, mthArgs fnSgn) argTuples
-
-            foldArg (exe, argSgns) (maybeName, exeArgPt) = do
-                (exe', argSgns')
-                where
-                    exe' = mkExe $ \ku -> do
-                        exec exe $ \_ -> do
-                            case maybeName' of
-                                Just name -> do
-                                    exec exeArgPt $ \pt re mem -> do
-                                        ku () re $ allocFrameVar fid name pt mem
-                                Nothing -> exec exeArgPt $ const $ ku ()
-                    (maybeName', argSgns') = do
-                        case maybeName of
-                            Just _ -> (maybeName,
-                                       filter ((/= maybeName).argName) argSgns)
-                            Nothing -> (argName $ head argSgns,
-                                        tail argSgns)
-            exeDefArgs :: Exe ()
-            exeDefArgs = do
-                foldl foldDef noop defSgns
-                where
-                    foldDef exe (ArgSgn{argName=(Just name)}) = do
-                        mkExe $ \ku -> do
-                            exec exe $ \_ -> do
-                                exec (defArgs M.! name) $ \pt re mem -> do
-                                    ku () re $ allocFrameVar fid name pt mem
-                    foldDef exe (ArgSgn{argName=Nothing}) = exe
-
-            bodyCont :: Cont
-            bodyCont re mem = do
---                 hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
---                                     (show $ length defSgns) ++ ", " ++
---                                     (show $ M.size defArgs))
-                (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
-
-            in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
-            -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
-
-    let lambdaVal closureFid = ValFunction $ FunImpl $ exeFunction closureFid
+    let lambdaVal closureFid = do
+        ValFunction $ FunImpl $ (Left.) $ mkCall fnSgn defArgs exeBody closureFid
     return $ RValue cid $ mkExeV $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
-exprSem (Expr_TypeName (UpperIdent (_, typeName))) = do
-    sid <- asks $ (!!! typeName).envStructs
-    struct <- gets $ (!!! sid).globStructs.sstGlob
-    let _strCid = structCid struct
-    cid <- newCid
-    -- cid ==> ((??) -> <struct with cid=strCid>)
-    let exeCtor _args = mkExePt $ \kpt re mem -> do
-        -- TODO: real constructor, common code with exprSem (Expr_Lambda ...)
-        let pt = nextPtr mem
-        let attrs = M.empty -- TODO
-        let mem' = memSet mem pt $ ValObject {
-            valObjStruct=sid,
-            valObjAttrs=attrs
-        }
-        kpt pt re mem'
-
-    return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl exeCtor
+exprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
+    maybeSid <- asks $ (M.lookup typeName).envStructs
+    maybeCid <- asks $ (M.lookup typeName).envClasses
+    when (not $ any isJust [maybeSid, maybeCid]) $ do
+        throwError $ SErrP pos ("Undefined class name: `" ++ typeName ++ "'")
+    rvalExe <- case maybeSid of
+        Just sid -> do
+            struct <- gets $ (!!! sid).globStructs.sstGlob
+            let _strCid = structCid struct
+            return $ mkExeV $ \ke -> ke $ ValFunction $ structCtor struct
+        _ -> return $ mkExeV ($ ValNull)
+    cid <- newCid  -- cid ==> ((??) -> <struct with cid=strCid>)
+    return $ TypeValue {
+        expCid=cid,
+        expRValue=rvalExe,
+        expCls=maybeCid >>= (return.Left),
+        expStr=maybeSid >>= (return.Left)
+    }
 
 exprSem (Expr_Field expr (LowerIdent (_, attrName))) = do
     exee <- exprSem expr
-    let cid = intCid -- cid <- newCid
+    let cid = (stdClss M.! "Int") -- cid <- newCid
     let
-        _objCid = fooCid -- (expCid exee)
+        _objCid = expCid exee
         exeGet = mkExePt $ exeAttr $ \_objPt attrs kpt re mem -> do
             kpt (attrs M.! attrName) re mem
         exeSet valPt = mkExe $ exeAttr $ \objPt attrs k re mem -> let
@@ -731,7 +663,7 @@ exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
     cid <- newCid
     let
-        objCid = fooCid -- (expCid exee)
+        _objCid = expCid exee
         exeGet = mkExePt $ exeProp $ \prop objPt -> do
             execPt $ propGetter prop objPt
         exeSet valPt = mkExe $ exeProp $ \prop objPt -> do
@@ -740,7 +672,7 @@ exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
         exeProp handler k_ =  do
             rValuePt exee $ \objPt re mem -> let
                 struct = objStruct (memGet mem objPt) re
-                impl = (structClasses struct) !!! objCid
+                impl = (structClasses struct) !!! (structCid struct) -- objCid
                 prop = impl !!! propName
                 in (handler prop objPt) k_ re mem
         in return $ LValue cid exeGet exeSet
@@ -768,7 +700,12 @@ exprSem (Expr_FunCall expr args) = do
         unJustKwarg (Nothing, _) = do
             throwError $ SErr "Positional arg after kwargs"
 
+exprSem (Expr_Parens [expr]) = exprSem expr
+
+-- exprSem (Expr_Parens exprs) = {- tuple -}
+
 exprSem expr = notYet expr
+
 
 
 fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
@@ -818,12 +755,60 @@ fnSignatureSem (FnSignature_ args _) = do
         argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
 
+mkCall :: FunSgn -> M.Map VarName (Exe Pointer) -> Exe () -> Fid ->
+    [(Maybe VarName, Exe Pointer)] -> Exe Value
+mkCall fnSgn defArgs exeBody closureFid argTuples = do
+    mkExe $ \ke re0 mem0 -> let
+        doReturn val re mem = ke val re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
+        re1 = re0{reReturn=doReturn}
+        (fid, mem1) = allocFrame closureFid mem0
+
+        exeArgs :: Exe ()
+        (exeArgs, defSgns) = foldl foldArg (noop, mthArgs fnSgn) argTuples
+
+        foldArg (exe, argSgns) (maybeName, exeArgPt) = do
+            (exe', argSgns')
+            where
+                exe' = mkExe $ \ku -> do
+                    exec exe $ \_ -> do
+                        case maybeName' of
+                            Just name -> do
+                                exec exeArgPt $ \pt re mem -> do
+                                    ku () re $ allocFrameVar fid name pt mem
+                            Nothing -> exec exeArgPt $ const $ ku ()
+                (maybeName', argSgns') = do
+                    case maybeName of
+                        Just _ -> (maybeName,
+                                    filter ((/= maybeName).argName) argSgns)
+                        Nothing -> (argName $ head argSgns,
+                                    tail argSgns)
+        exeDefArgs :: Exe ()
+        exeDefArgs = do
+            foldl foldDef noop defSgns
+            where
+                foldDef exe (ArgSgn{argName=(Just name)}) = do
+                    mkExe $ \ku -> do
+                        exec exe $ \_ -> do
+                            exec (defArgs M.! name) $ \pt re mem -> do
+                                ku () re $ allocFrameVar fid name pt mem
+                foldDef exe (ArgSgn{argName=Nothing}) = exe
+
+        bodyCont :: Cont
+        bodyCont re mem = do
+--                 hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
+--                                     (show $ length defSgns) ++ ", " ++
+--                                     (show $ M.size defArgs))
+            (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
+
+        in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
+        -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
+
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExprSem
 intBinopSem op exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
-    return $ RValue intCid $ mkExeV $ \ke -> do
+    return $ RValue (stdClss M.! "Int") $ mkExeV $ \ke -> do
         rValue e1exe $ \(ValInt v1) -> do
             rValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
