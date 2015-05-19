@@ -84,9 +84,8 @@ MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 
 
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [SuperType] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [SuperType] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -100,6 +99,9 @@ MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" Expr9 ;
 
 MaybeSubclasses_None. MaybeSubclasses ::= ;
 MaybeSubclasses_Some. MaybeSubclasses ::= ">" Expr9 ;
+
+separator SuperType "," ;
+SuperType_. SuperType ::= Expr9 ;
 
 separator VariantDefinition "" ;
 VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;

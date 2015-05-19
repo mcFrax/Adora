@@ -89,8 +89,7 @@ data PropImpl = PropImpl {
 instance Show PropImpl where
     show _ = "<PropImpl>"
 
-data FunImpl = FunImpl {
-    funDesc :: FunSgn,
+newtype FunImpl = FunImpl {
     funBody :: [(Maybe VarName, Exe Pointer)] -> Either (Exe Value) (Exe Pointer)
 }
 

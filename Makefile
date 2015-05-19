@@ -10,8 +10,7 @@ CommonGHCFlags := -cpp -O2 -DUSE_HASKELINE
 all: Testadora interpreter
 
 interpreter: $(ParserObjects) $(OtherHs)
-	@#ghc -Wall -Werror --make interpreter.hs -o interpreter
-	ghc $(CommonGHCFlags) -Wall --make interpreter.hs -o interpreter
+	ghc $(CommonGHCFlags) -Wall -Werror --make interpreter.hs -o interpreter
 
 Testadora: $(ParserObjects)
 	ghc $(CommonGHCFlags) --make Testadora.hs -o Testadora

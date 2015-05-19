@@ -26,6 +26,7 @@ data SemState = SemState {
     sstClassTmpls :: TemplateMap CTid ClassDesc,
     sstFunClasses :: M.Map () Cid,
     sstNextCid :: Cid,
+    sstNextSid :: Sid,
     sstClassRules :: [ClassRule]
 }
 
@@ -50,6 +51,13 @@ newCid = do
     let cid = sstNextCid stt
     put stt{sstNextCid=cid+1}
     return cid
+
+newSid :: Semantic Sid
+newSid = do
+    stt <- get
+    let sid = sstNextSid stt
+    put stt{sstNextSid=sid+1}
+    return sid
 
 
 -- To samo mozna by dostac uzywajac ErrorT, StateT i Reader,
@@ -175,13 +183,9 @@ moduleSem (Module_ stmts) = do
                                     propGetter=(\_pt -> mkExeV $ \ke -> ke $ ValInt 666),
                                     propSetter=(\_pt vpt -> mkExe $ \k re mem -> (hPutStrLn stderr $ (++) "foo setter: " $ show $ memGet mem vpt) >> (k () re mem))
                                 }),
-                                ("fooThat", mkMth $ \_pt -> FunImpl {
-                                    funDesc=FunSgn {
-                                        mthRetType=Just intCid,
-                                        mthArgs=[]
-                                    },
-                                    funBody=(\args -> mkExeV $ \ke re mem -> (hPutStrLn stderr $ (++) "fooThat: " $ show $ map fst args) >> (ke (ValInt 555) re mem))
-                                })
+                                ("fooThat", mkMth $ \_pt -> FunImpl (\args ->
+                                    mkExeV $ \ke re mem -> (hPutStrLn stderr $ (++) "fooThat: " $ show $ map fst args) >> (ke (ValInt 555) re mem))
+                                )
                             ])
                         ]
                     })
@@ -191,6 +195,7 @@ moduleSem (Module_ stmts) = do
             sstClassTmpls=(M.empty, M.empty),
             sstFunClasses=M.empty,
             sstNextCid=0,
+            sstNextSid=0,
             sstClassRules=[]
         }
 
@@ -227,7 +232,7 @@ stmtSeqSem stmts = do
         stmtSeqSem' [] = return noop -- TODO: check return
         stmtSeqSem' (h:t) = do
             (hexe, t') <- case h of
-                Stmt_If (Tok_If (pos, _)) condExpr bodyBlock -> do
+                Stmt_If (Tok_If (_pos, _)) condExpr bodyBlock -> do
                     let (elses, t') = stripElses t
                     hexe <- ifSem condExpr bodyBlock elses
                     return (hexe, t')
@@ -237,10 +242,10 @@ stmtSeqSem stmts = do
             modifiedEnv <- ask  -- TODO: env modification (including var initialization)
             texe <- local (const modifiedEnv) $ stmtSeqSem' t'
             return $ mkExe $ (exec hexe).const.(exec texe)
-        stripElses ((Stmt_Elif (Tok_Elif (pos, _)) condExpr bodyBlock):t) = let
+        stripElses ((Stmt_Elif (Tok_Elif (_pos, _)) condExpr bodyBlock):t) = let
             ((elifs, maybeElse), t') = stripElses t
             in (((condExpr, bodyBlock):elifs, maybeElse), t')
-        stripElses ((Stmt_Else (Tok_Else (pos, _)) bodyBlock):t) = do
+        stripElses ((Stmt_Else (Tok_Else (_pos, _)) bodyBlock):t) = do
             (([], Just bodyBlock), t)
         stripElses t = do
             (([], Nothing), t)
@@ -290,7 +295,7 @@ hoisted stmts innerSem = do
                         throwError $ SErrP pos $ (
                             "Class `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName cid classes)
-                Just (Right ctid) -> do
+                Just (Right _ctid) -> do
                     notYet "Just (Right ctid)"
                 Nothing -> return (False, classes)
             (strFound, structs') <- case expStr typeSem of
@@ -299,7 +304,7 @@ hoisted stmts innerSem = do
                         throwError $ SErrP pos $ (
                             "Struct `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName sid structs)
-                Just (Right stid) -> do
+                Just (Right _stid) -> do
                     notYet "Just (Right stid)"
                 Nothing -> return (False, structs)
             when (not $ clsFound || strFound) $ do
@@ -319,29 +324,36 @@ hoisted stmts innerSem = do
                 MaybeTemplateSgn_None -> do
                     return ()  -- TODO?
                 MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
-            superClses <- mapM exprSem superClsExprs
+            superClses <- mapM (\(SuperType_ t) -> exprSem t) superClsExprs
             cid <- newCid
             mapM_ assertIsTypeValue superClses
             return (beforeEnv{envClasses=M.insert clsName cid classes},
                     compilePrev)
-        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeDefinition_ClassStruct {})) = do
-            notYet "TypeDefinition_ClassStruct"
         hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
-            let (TypeDefinition_Struct ident mTmplSgn superStrExprs decls) = strDef
+            let (TypeDefinition_Struct ident mTmplSgn superStrExprs _decls) = strDef
             let UpperIdent (pos, strName) = ident
             let classes = envClasses beforeEnv
             let structs = envStructs beforeEnv
-            when (isJust $ M.lookup strName structs) $
+            when (isJust $ M.lookup strName classes) $
                 throwError $ SErrP pos ("Class `" ++ strName ++ "' already defined")
+            when (isJust $ M.lookup strName structs) $
+                throwError $ SErrP pos ("Struct `" ++ strName ++ "' already defined")
             case mTmplSgn of
                 MaybeTemplateSgn_None -> do
                     return ()  -- TODO?
                 MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
-            superStrs <- mapM exprSem superStrExprs
+            superStrs <- mapM (\(SuperType_ t) -> exprSem t) superStrExprs
             cid <- newCid
+            sid <- newSid
             mapM_ assertIsTypeValue superStrs
-            return (beforeEnv{envStructs=M.insert strName cid structs},
-                    compilePrev)
+            let
+                compile env = do
+                    compilePrev env
+                    -- TODO ???
+            return (beforeEnv{
+                        envStructs=M.insert strName sid structs,
+                        envClasses=M.insert strName cid classes
+                    }, compile)
         hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_Decl _) = do
             error "FOooo" --TODO?
             -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
@@ -375,13 +387,6 @@ hoisted stmts innerSem = do
                     }
                     return (beforeEnv{envVars=M.insert varName var vars},
                             compilePrev)
-
-        hoistGlobStmt :: Stmt -> Semantic ()  -- updating GlobEnv
-        hoistGlobStmt (Stmt_Decl decl) = do
-            error "FOoooO"
-        hoistGlobStmt _stmt = do
-            -- TODO
-            return ()
 
 data ExprSem = RValue {
                 expCid :: Cid,
@@ -516,7 +521,7 @@ stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
     case rType of
         Just Nothing ->
             return $ mkExe $ \_ re -> reReturn re ValNull re
-        Just cid ->
+        Just _cid ->
             throwError $ SErrP pos ("Return statement without value " ++
                                     "in funtion with return type")
         Nothing ->
@@ -528,7 +533,7 @@ stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
         Just Nothing ->
             throwError $ SErrP pos ("Return statement with value " ++
                                     "in funtion returning nothing")
-        Just cid -> do
+        Just _cid -> do
             -- TODO: check cid
             eexe <- exprSem expr
             return $ mkExe $ \_ -> rValue eexe $ \val re -> reReturn re val re
@@ -681,20 +686,17 @@ exprSem (Expr_Lambda signature block) = do
             in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
             -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
 
-    let lambdaVal closureFid = ValFunction $ FunImpl {
-        funDesc=fnSgn,
-        funBody=exeFunction closureFid
-    }
+    let lambdaVal closureFid = ValFunction $ FunImpl $ exeFunction closureFid
     return $ RValue cid $ mkExeV $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
 exprSem (Expr_TypeName (UpperIdent (_, typeName))) = do
     sid <- asks $ (!!! typeName).envStructs
     struct <- gets $ (!!! sid).globStructs.sstGlob
-    let strCid = structCid struct
+    let _strCid = structCid struct
     cid <- newCid
     -- cid ==> ((??) -> <struct with cid=strCid>)
-    let exeCtor args = mkExePt $ \kpt re mem -> do
+    let exeCtor _args = mkExePt $ \kpt re mem -> do
         -- TODO: real constructor, common code with exprSem (Expr_Lambda ...)
         let pt = nextPtr mem
         let attrs = M.empty -- TODO
@@ -704,20 +706,14 @@ exprSem (Expr_TypeName (UpperIdent (_, typeName))) = do
         }
         kpt pt re mem'
 
-    return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl {
-        funDesc=FunSgn {
-            mthRetType=Just strCid,
-            mthArgs=[]
-        },
-        funBody=exeCtor
-    }
+    return $ RValue cid $ mkExeV $ \ke -> ke $ ValFunction $ FunImpl exeCtor
 
 exprSem (Expr_Field expr (LowerIdent (_, attrName))) = do
     exee <- exprSem expr
     let cid = intCid -- cid <- newCid
     let
-        objCid = fooCid -- (expCid exee)
-        exeGet = mkExePt $ exeAttr $ \objPt attrs kpt re mem -> do
+        _objCid = fooCid -- (expCid exee)
+        exeGet = mkExePt $ exeAttr $ \_objPt attrs kpt re mem -> do
             kpt (attrs M.! attrName) re mem
         exeSet valPt = mkExe $ exeAttr $ \objPt attrs k re mem -> let
             mem' = memAdjust mem objPt $ \objVal -> objVal{
