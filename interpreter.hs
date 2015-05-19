@@ -18,11 +18,13 @@ import Semantic
 main :: IO ()
 main = do
     args <- getArgs
-    code <- case args of
+    (code, programPath) <- case args of
         [] -> do
-            readStdin
+            code <- readStdin
+            return (code, "<stdin>")
         [programPath] -> do
-            readFile programPath
+            code <- readFile programPath
+            return (code, programPath)
         _ -> do
             progName <- getProgName
             hPutStrLn stderr $ "Usage:\n    " ++ progName ++ " [FILE PATH]\n"
@@ -34,7 +36,7 @@ main = do
         Ok moduleSyntax -> do
             case moduleSem moduleSyntax of
                 Left errmsg -> do
-                    hPutStrLn stderr $ showSemError errmsg
+                    hPutStrLn stderr $ showSemError programPath errmsg
                     exitFailure
                 Right runModule -> runModule
     where

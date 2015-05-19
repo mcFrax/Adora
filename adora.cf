@@ -41,6 +41,7 @@ _.  Decl ::= Decl2 ;  -- declarations available everywhere
 
 _. Decl10 ::= Decl0 ;  -- declarations available in class/struct definition
 _. Decl10 ::= Decl2 ;  -- declarations available in class/struct definition
+Decl_Pass. Decl10 ::= "pass" ;
 
 -- _. Decl11 ::= Decl1 ;  -- declarations available in outside class/struct definition
 _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definition

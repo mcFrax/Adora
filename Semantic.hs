@@ -19,6 +19,7 @@ import Printadora(printTree)
 import ExprExe
 import Memory
 import Types
+import StdLib
 
 
 data SemState = SemState {
@@ -102,13 +103,13 @@ data SErr = SErr String
 instance Error SErr where
   strMsg = SErr
 
-showPos :: (Int, Int) -> String
-showPos (ln, col) = (show ln) ++ ":" ++ (show col)
+showPos :: String -> (Int, Int) -> String
+showPos path (ln, col) = path ++ ":" ++ (show ln) ++ ":" ++ (show col)
 
-showSemError :: SErr -> String
-showSemError (SErr s) = "?:?: error: " ++ s
-showSemError (SErrP pos s) = do
-     (showPos pos) ++ ": error: " ++ s
+showSemError :: String -> SErr -> String
+showSemError path (SErr s) = path ++ ":?:?: error: " ++ s
+showSemError path (SErrP pos s) = do
+    (showPos path pos) ++ ": error: " ++ s
 
 stdClss :: M.Map String Cid
 stdClss = M.fromList [
@@ -128,14 +129,23 @@ mkMth mth = PropImpl {
 
 moduleSem :: Module -> Either SErr (IO ())
 moduleSem (Module_ stmts) = do
-    (sst, _, sem) <- runSemantic (stmtSeqSem stmts) initSemState outerEnv
-    let runEnv = RunEnv {
-        reStructs=globStructs $ sstGlob sst,
-        reReturn=undefined,
-        reBreak=undefined,
-        reContinue=undefined
-    }
-    return $ runExe sem runEnv emptyMem
+    let Module_ stdlibStmts = stdlib
+    (sst0, env0, exe0) <- do
+        case runSemantic (stmtSeqSem stdlibStmts) initSemState initEnv of
+            Right res -> return res
+            Left errmsg -> do
+                error ("Error in standard library:\n" ++
+                       (showSemError "stdlib.adora" errmsg))
+    (sst, _, exe1) <- runSemantic (stmtSeqSem stmts) sst0 env0
+    let
+        runEnv = RunEnv {
+            reStructs=globStructs $ sstGlob sst,
+            reReturn=undefined,
+            reBreak=undefined,
+            reContinue=undefined
+        }
+        exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
+    return $ runExe exe runEnv emptyMem
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
@@ -150,7 +160,7 @@ moduleSem (Module_ stmts) = do
             sstClassRules=[]
         }
 
-        outerEnv = LocEnv {
+        initEnv = LocEnv {
             envSuper=Nothing,
             envVars=M.fromList [],
             envClasses=stdClss,
@@ -170,7 +180,7 @@ moduleSem (Module_ stmts) = do
             }
 
 stmtBlockSem :: StatementBlock -> Semantic (Exe ())
-stmtBlockSem (StatementBlock_ stmts) = stmtSeqSem stmts
+stmtBlockSem (StatementBlock_ stmts) = local id $ stmtSeqSem stmts
 
 stmtSeqSem :: [Stmt] -> Semantic (Exe ())
 stmtSeqSem stmts = do
@@ -212,28 +222,26 @@ stmtSeqSem stmts = do
                 elseSem (((condExpr', bodyBlock'):elifs), maybeElse) = do
                     ifSem condExpr' bodyBlock' (elifs, maybeElse)
 
-hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)  -- wrapped `local`
+hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)
 hoisted stmts innerSem = do
-    outerEnv <- ask
-    (env', compileHoisted) <- foldl foldStmt (initFold outerEnv) stmts
-    compileHoisted env'
-    local (const env') $ innerSem
+    compileHoisted <- foldl foldStmt (return $ return ()) stmts
+    compileHoisted
+    innerSem
     where
         foldStmt hoistPrev stmt = do
             intermediate <- hoistPrev
             hoistLocStmt intermediate stmt
-        initFold outerEnv = return (outerEnv, const $ return ())
-        hoistLocStmt :: (LocEnv, LocEnv -> (Semantic ())) -> Stmt ->
-            Semantic (LocEnv, LocEnv -> (Semantic ()))
-        hoistLocStmt beforeEnv_compilePrev (Stmt_Let ident _expr) = do
-            hoistVar False ident  beforeEnv_compilePrev
-        hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_LetTuple {}) = do
+        hoistLocStmt :: Semantic () -> Stmt -> Semantic (Semantic ())
+        hoistLocStmt compilePrev (Stmt_Let ident _expr) = do
+            hoistVar False ident compilePrev
+        hoistLocStmt _compilePrev (Stmt_LetTuple {}) = do
             notYet $ "hoistLocStmt (Stmt_LetTuple ..)"
-        hoistLocStmt beforeEnv_compilePrev (Stmt_Var ident _expr) = do
-            hoistVar True ident beforeEnv_compilePrev
-        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl (TypeAliasDefinition ident typeExpr)) = do
+        hoistLocStmt compilePrev (Stmt_Var ident _expr) = do
+            hoistVar True ident compilePrev
+        hoistLocStmt compilePrev (Stmt_Decl (TypeAliasDefinition ident typeExpr)) = do
             let UpperIdent (pos, aliasName) = ident
-            let (classes, structs) = (envClasses beforeEnv, envStructs beforeEnv)
+            classes <- asks envClasses
+            structs <- asks envStructs
             typeSem <- typeExprSem typeExpr
             (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
                 Just (Left cid) -> do
@@ -255,15 +263,16 @@ hoisted stmts innerSem = do
                 Nothing -> return (False, structs)
             when (not $ clsFound || strFound) $ do
                 error "not $ clsFound || strFound"
-            return (beforeEnv{
+            modifyEnv $ \env -> env {
                     envClasses=classes',
                     envStructs=structs'
-                }, compilePrev)
+                }
+            return compilePrev
 
-        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
+        hoistLocStmt compilePrev (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
             let (TypeDefinition_Class ident mTmplSgn superClsExprs _variants _decls) = clsDef
             let UpperIdent (pos, clsName) = ident
-            let classes = envClasses beforeEnv
+            classes <- asks envClasses
             when (isJust $ M.lookup clsName classes) $
                 throwError $ SErrP pos ("Class `" ++ clsName ++ "' already defined")
             case mTmplSgn of
@@ -272,16 +281,18 @@ hoisted stmts innerSem = do
                 MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
             _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
             cid <- newCid
-            return (beforeEnv{envClasses=M.insert clsName cid classes},
-                    compilePrev)
-        hoistLocStmt (beforeEnv, compilePrev) (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
+            modifyEnv $ \env -> env {
+                    envClasses=M.insert clsName cid classes
+                }
+            return compilePrev
+        hoistLocStmt compilePrev (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
             let (TypeDefinition_Struct ident mTmplSgn superStrExprs decls) = strDef
             let UpperIdent (pos, strName) = ident
-            let classes = envClasses beforeEnv
-            let structs = envStructs beforeEnv
-            when (isJust $ M.lookup strName classes) $
+            beforeClasses <- asks envClasses
+            beforeStructs <- asks envStructs
+            when (isJust $ M.lookup strName beforeClasses) $
                 throwError $ SErrP pos ("Class `" ++ strName ++ "' already defined")
-            when (isJust $ M.lookup strName structs) $
+            when (isJust $ M.lookup strName beforeStructs) $
                 throwError $ SErrP pos ("Struct `" ++ strName ++ "' already defined")
             case mTmplSgn of
                 MaybeTemplateSgn_None -> do
@@ -290,68 +301,69 @@ hoisted stmts innerSem = do
             _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
             cid <- newCid
             sid <- newSid
-            attrs <- hoistAttrs decls
-            impls <- hoistImpls decls
-            let
-                struct = StructDesc {
-                    structCid=cid,
-                    structAttrs=attrs,
-                    structClasses=impls,
-                    structCtor=FunImpl $ constructor
+            let compile = do
+                compilePrev
+                glob <- gets sstGlob
+                attrs <- hoistAttrs
+                impls <- hoistImpls
+                let
+                    attrsMap = M.fromList attrs
+                    struct = StructDesc {
+                        structCid=cid,
+                        structAttrs=attrsMap,
+                        structClasses=impls,
+                        structCtor=FunImpl $ constructor
+                    }
+                    constructor argTuples = do
+                        mkExePt $ \kpt re mem -> let
+                            exe = mkCall ctorSgn M.empty exeCtorBody (0-1) argTuples
+                            in exec exe (\(ValInt pt) -> kpt pt) re mem
+                    ctorSgn = FunSgn {
+                        mthRetType=Just cid,
+                        mthArgs=map attrToArg $ attrs
+                    }
+                    attrToArg (attrName, attrCid) = ArgSgn {
+                        argName=Just attrName,
+                        argType=attrCid,
+                        argHasDefault=False  -- TODO?
+                    }
+                    exeCtorBody = mkExe $ \_ re mem -> let
+                        vars = frameContent $ memFrame mem
+                        mem' = allocVar "self" ValObject {
+                                valObjStruct=sid,
+                                valObjAttrs=M.intersection vars attrsMap
+                            } mem
+                        -- TODO: execute custom contructor body/init method?
+                        pt = (getVarPt "self" mem')
+                        in (reReturn re) (ValInt pt) re mem'
+                    glob' = glob{
+                        globStructs=M.insert sid struct $ globStructs glob
+                    }
+                    in modify $ \sst -> sst{sstGlob=glob'}
+                where
+                    hoistAttrs = do
+                        attrs <- sequence $ do
+                            decl <- decls
+                            case decl of
+                                (FieldDefinition typeExpr
+                                                (LowerIdent (pos', name))
+                                                _maybeDefault) -> return $ do
+                                    typeSem <- typeExprSem typeExpr
+                                    cid' <- case expCls typeSem of
+                                        Just (Left cid') -> return cid'
+                                        _ -> throwError $ SErrP pos' (
+                                                "typeExpr without cid?")
+                                    return (name, cid')
+                                _ -> []
+                        -- TODO check integrity
+                        return attrs
+                    hoistImpls = return M.empty
+            modifyEnv $ \env -> env {
+                    envStructs=M.insert strName sid beforeStructs,
+                    envClasses=M.insert strName cid beforeClasses
                 }
-                constructor argTuples = do
-                    mkExePt $ \kpt re mem -> let
-                        exe = mkCall ctorSgn M.empty exeCtorBody (0-1) argTuples
-                        in exec exe (\(ValInt pt) -> kpt pt) re mem
-                ctorSgn = FunSgn {
-                    mthRetType=Just cid,
-                    mthArgs=map attrToArg $ M.toList attrs
-                }
-                attrToArg (attrName, attrCid) = ArgSgn {
-                    argName=Just attrName,
-                    argType=attrCid,
-                    argHasDefault=False  -- TODO?
-                }
-                exeCtorBody = mkExe $ \_ re mem -> let
-                    vars = frameContent $ memFrame mem
-                    mem' = allocVar "self" ValObject {
-                            valObjStruct=sid,
-                            valObjAttrs=M.intersection vars attrs
-                        } mem
-                    -- TODO: execute custom contructor body/init method?
-                    pt = (getVarPt "self" mem')
-                    in (reReturn re) (ValInt pt) re mem'
-                compile env = do
-                    compilePrev env
-                    glob <- gets sstGlob
-                    let glob' = glob{
-                            globStructs=M.insert sid struct $ globStructs glob
-                        }
-                    modify $ \sst -> sst{sstGlob=glob'}
-
-            return (beforeEnv{
-                        envStructs=M.insert strName sid structs,
-                        envClasses=M.insert strName cid classes
-                    }, compile)
-            where
-                hoistAttrs decls = do
-                    attrs <- sequence $ do
-                        decl <- decls
-                        case decl of
-                            (FieldDefinition typeExpr
-                                             (LowerIdent (pos, name))
-                                             _maybeDefault) -> return $ do
-                                typeSem <- typeExprSem typeExpr
-                                cid <- case expCls typeSem of
-                                    Just (Left cid) -> return cid
-                                    _ -> throwError $ SErrP pos (
-                                            "typeExpr without cid?")
-                                return (name, cid)
-                            _ -> []
-                    -- TODO check integrity
-                    return $ M.fromList attrs
-                hoistImpls _decls = return M.empty
-        hoistLocStmt (_beforeEnv, _compilePrev) (Stmt_Decl _) = do
+            return compile
+        hoistLocStmt _compilePrev (Stmt_Decl _) = do
             error "FOooo" --TODO?
             -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
             -- MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
@@ -363,18 +375,18 @@ hoisted stmts innerSem = do
             -- TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
             -- TypeDefinition_ClassStruct.  Decl7 ::= "class" "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
             -- TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
-        hoistLocStmt (beforeEnv, compilePrev) _stmt = return (beforeEnv, compilePrev)
+        hoistLocStmt compilePrev _stmt = return compilePrev
 
-        hoistVar :: Bool -> LowerIdent -> (LocEnv, LocEnv -> (Semantic ())) -> Semantic (LocEnv, LocEnv -> (Semantic ()))
-        hoistVar mutable (LowerIdent (pos, varName)) (beforeEnv, compilePrev) = do
+        hoistVar :: Bool -> LowerIdent -> Semantic () -> Semantic (Semantic ())
+        hoistVar mutable (LowerIdent (pos, varName)) compilePrev = do
             cid <- newCid
-            let vars = envVars beforeEnv
+            vars <- asks envVars
             case M.lookup varName vars of
                 Just var -> do
                     let msg = "variable redefined: `" ++ varName ++ "'"
                     throwError $ SErrP pos $ case varDefPos var of
                         Just pos' -> do
-                            msg ++ "'\nPreviously defined at " ++ (showPos pos')
+                            msg ++ "'\nPreviously defined at " ++ (showPos "" pos')
                         Nothing -> msg
                 Nothing -> do
                     let var = VarType {
@@ -382,8 +394,8 @@ hoisted stmts innerSem = do
                         varMutable=mutable,
                         varDefPos=Just pos
                     }
-                    return (beforeEnv{envVars=M.insert varName var vars},
-                            compilePrev)
+                    modifyEnv $ \env -> env{envVars=M.insert varName var vars}
+                    return compilePrev
 
 
 
