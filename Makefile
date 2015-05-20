@@ -13,7 +13,7 @@ all: Testadora interpreter
 	ghc $(CommonGHCFlags) -Wall -Werror --make "$<" -o "$@"
 
 interpreter: $(ParserObjects) $(filter-out parselib.hs,$(SourceHs)) StdLib.hs
-parselib: $(ParserObjects) $(SourceHs) $(filter-out interpreter.hs,$(SourceHs))
+parselib: $(ParserObjects)
 
 Testadora: $(ParserObjects) Testadora.hs
 	# special rule without -Wall and -Werror
