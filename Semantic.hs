@@ -113,6 +113,7 @@ showSemError path (SErrP pos s) = do
 
 stdClss :: M.Map String Cid
 stdClss = M.fromList [
+        ("Object", 0-0),
         ("Bool", 0-1),
         ("Int", 0-2),
         ("Double", 0-3),
@@ -145,7 +146,7 @@ moduleSem (Module_ stmts) = do
             reContinue=undefined
         }
         exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
-    return $ runExe exe runEnv emptyMem
+    return $ runExe exe runEnv initMem
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
@@ -162,12 +163,20 @@ moduleSem (Module_ stmts) = do
 
         initEnv = LocEnv {
             envSuper=Nothing,
-            envVars=M.fromList [],
+            envVars=M.fromList [
+                ("true", VarType True (stdClss M.! "Bool") Nothing),
+                ("false", VarType False (stdClss M.! "Bool") Nothing)
+            ],
             envClasses=stdClss,
             envStructs=M.empty,
             envExpectedReturnType=Nothing,
             envInsideLoop=False
         }
+
+        initMem = foldl (flip ($)) emptyMem $ [
+                allocVar "true" $ ValBool True,
+                allocVar "false" $ ValBool False
+            ]
 
         emptyMem = Memory {
             memFid=0,
@@ -309,6 +318,7 @@ hoisted stmts innerSem = do
                 let
                     attrsMap = M.fromList attrs
                     struct = StructDesc {
+                        structName=strName,
                         structCid=cid,
                         structAttrs=attrsMap,
                         structClasses=impls,
@@ -415,9 +425,9 @@ stmtSem (Stmt_Decl _) = return noop
 stmtSem (Stmt_Expr expr) = do
     esem <- exprSem expr
     return $ mkExe $ \k -> do
-        -- esem $ \_ -> k ()
-        rValue esem $ \v -> do
-            io (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) k
+        rValue esem $ \_ -> k ()
+--         rValue esem $ \v -> do
+--             io (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) k
 
 stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
     eexe <- exprSem expr
@@ -446,8 +456,10 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
          _ -> throwError $ SErr $ "Left side of assignment is not l-value"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
-stmtSem (Stmt_Elif {}) = throwError $ SErr $ "Unexpected elif statement"
-stmtSem (Stmt_Else {}) = throwError $ SErr $ "Unexpected else statement"
+stmtSem (Stmt_Elif (Tok_Elif (pos, _)) _ _) = do
+    throwError $ SErrP pos "Unexpected elif statement"
+stmtSem (Stmt_Else (Tok_Else (pos, _)) _) = do
+    throwError $ SErrP pos "Unexpected else statement"
 
 stmtSem (Stmt_While condExpr block) = do
     exeCond <- exprSem condExpr
@@ -478,12 +490,14 @@ stmtSem Stmt_Break = do
         return $ mkExe $ \_ re -> reBreak re re
     else
         throwError $ SErr $ "Unexpected break statement"
+
 stmtSem Stmt_Continue = do
     insideLoop <- asks envInsideLoop
     if insideLoop then
         return $ mkExe $ \_ re -> reContinue re re
     else
         throwError $ SErr $ "Unexpected continue statement"
+
 stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
     rType <- asks envExpectedReturnType
     case rType of
@@ -495,6 +509,7 @@ stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
         Nothing ->
             throwError $ SErrP pos ("Unexpected return statement " ++
                                     "outside of function body")
+
 stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
     rType <- asks envExpectedReturnType
     case rType of
@@ -508,15 +523,38 @@ stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
         Nothing ->
             throwError $ SErrP pos ("Unexpected return statement " ++
                                     "outside of function body")
-stmtSem (Stmt_Assert expr) = do
+
+stmtSem (Stmt_Assert (Tok_Assert (pos, _)) expr) = do
     eexe <- exprSem expr
     return $ mkExe $ \k -> rValue eexe $ \val -> do
         if isTruthy val then
             k ()
         else
             \_ _ -> do
-                hPutStrLn stderr $ "Assertion failed: " ++ (printTree expr)
+                hPutStrLn stderr ("Assertion at " ++ (showPos "" pos) ++
+                                  "failed: " ++ (printTree expr))
                 exitFailure
+
+stmtSem (Stmt_Print {}) = do
+    return $ mkExe $ \k re mem -> do
+        putChar '\n'
+        k () re mem
+
+stmtSem (Stmt_PrintValues (Tok_Print (_pos, _)) exprs) = do
+    exprExes <- mapM exprSem exprs
+    return $ doPrint exprExes
+    where
+        doPrint [exprExe] = mkExe $ \k -> do
+            rValue exprExe $ \val re mem -> do
+                putStr (show val)
+                putChar '\n'
+                k () re mem
+        doPrint (exprExe:exprExes) = mkExe $ \k -> do
+            rValue exprExe $ \val re mem -> do
+                putStr (show val)
+                putChar ' '
+                exec (doPrint exprExes) k re mem
+        doPrint [] = undefined
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
@@ -807,9 +845,6 @@ mkCall fnSgn defArgs exeBody closureFid argTuples = do
 
         bodyCont :: Cont
         bodyCont re mem = do
---                 hPutStrLn stderr $ ("Call: length defSgns, M.size defArgs: " ++
---                                     (show $ length defSgns) ++ ", " ++
---                                     (show $ M.size defArgs))
             (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
 
         in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1

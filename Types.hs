@@ -72,6 +72,7 @@ data ArgSgn = ArgSgn {
 } deriving (Eq, Ord, Show)
 
 data StructDesc = StructDesc {
+    structName :: VarName,
     structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl,
@@ -125,7 +126,15 @@ data Value = ValNull
            | ValObject {
                 valObjStruct :: Sid,
                 valObjAttrs :: M.Map VarName Pointer
-             } deriving Show
+             }
+
+instance Show Value where
+    show ValNull = "null"
+    show (ValFunction _) = "<function object>"
+    show (ValBool b) = if b then "true" else "false"
+    show (ValInt i) = show i
+    show (ValChar c) = show c
+    show (ValObject sid _attrs) = "<struct with sid " ++ (show sid) ++ ">"
 
 instance NFData Value where
     rnf ValNull = ()

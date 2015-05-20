@@ -14,9 +14,11 @@ layout ":" ;
 -- Lexer - tokens
 
 separator LowerIdent "," ;
+position token Tok_Assert 'a''s''s''e''r''t' ;
 position token Tok_If 'i''f' ;
 position token Tok_Elif 'e''l''i''f' ;
 position token Tok_Else 'e''l''s''e' ;
+position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
@@ -137,7 +139,9 @@ Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBloc
 Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
 Stmt_Break.         Stmt ::= "break" ;
 Stmt_Continue.      Stmt ::= "continue" ;
-Stmt_Assert.        Stmt ::= "assert" Expr ;
+Stmt_Assert.        Stmt ::= Tok_Assert Expr ;
+Stmt_Print.         Stmt ::= Tok_Print ;
+Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
 
 AssignOper_Assign. AssignOper ::= "=" ;
 AssignOper_Inc.    AssignOper ::= "+=" ;
