@@ -759,14 +759,17 @@ exprSem expr = notYet expr
 
 
 fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
-fnSignatureSem (FnSignature_ args _) = do
+fnSignatureSem (FnSignature_ args optResType) = do
     argTuples <- mapM argSem args
-    -- TODO: process ret type
-    -- OptResultType_None. OptResultType ::= ;
-    -- OptResultType_Some. OptResultType ::= "->" TypeExpr;
-    -- TODO: check that args have unique names
+    retType <- case optResType of
+        OptResultType_None -> return Nothing
+        OptResultType_Some typeExpr -> do
+            typeSem <- typeExprSem typeExpr
+            case expCls typeSem of
+                Just (Left retCid) -> return $ Just retCid
+                _ -> throwError $ SErr ("typeExpr without cid?")
     let funSgn = FunSgn {
-        mthRetType=Nothing,
+        mthRetType=retType,
         mthArgs=(map fst argTuples)
     }
     let defArgsMap = foldl argToMap M.empty argTuples

@@ -14,11 +14,19 @@ let a = fn(Int in_k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () 
     else:
         return b()
 
-x = fn(Int i):
-    return fn(Int _):
+x = fn(Int i) -> Object:
+    # typy funkcji za bardzo nie działają, ale `Object`
+    # daje się użyć przy braku statycznych sprawdzeń typu
+    return fn(Int _) -> Int:
         return i
 
-a(0, x(1), x(-1), x(-1), x(1), x(0))
-a(1, x(1), x(-1), x(-1), x(1), x(0))
-a(2, x(1), x(-1), x(-1), x(1), x(0))
-a(3, x(1), x(-1), x(-1), x(1), x(0))
+var ii = 0
+while ii < 4:
+    print a(ii, x(1), x(-1), x(-1), x(1), x(0))
+    ii = ii+1
+
+# EXPECTED OUTPUT #
+# 1
+# 0
+# -2
+# 0
