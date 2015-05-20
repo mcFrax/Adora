@@ -556,6 +556,11 @@ stmtSem (Stmt_PrintValues (Tok_Print (_pos, _)) exprs) = do
                 exec (doPrint exprExes) k re mem
         doPrint [] = undefined
 
+stmtSem Stmt_Memdump = do
+    return $ mkExe $ \k re mem -> do
+        hPutStrLn stderr $ show mem
+        k () re mem
+
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;

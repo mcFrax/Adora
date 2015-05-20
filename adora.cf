@@ -142,6 +142,7 @@ Stmt_Continue.      Stmt ::= "continue" ;
 Stmt_Assert.        Stmt ::= Tok_Assert Expr ;
 Stmt_Print.         Stmt ::= Tok_Print ;
 Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
+Stmt_Memdump.       Stmt ::= "dumpmem" ;
 
 AssignOper_Assign. AssignOper ::= "=" ;
 AssignOper_Inc.    AssignOper ::= "+=" ;

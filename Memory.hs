@@ -80,11 +80,19 @@ allocFrameVar fid k pt mem = do
     mem{memFrames=M.insert fid frame' frames}
 
 assignFrameVar :: FrameKey -> Pointer -> Memory -> Memory
-assignFrameVar k pt mem = allocFrameVar (memFid mem) k pt mem
-
-assignVar :: FrameKey -> Value -> Memory -> Memory
-assignVar k v mem = do
-    memSet mem (getVarPt k mem) v
+assignFrameVar k pt mem = do
+    getVarPt' $ memFid mem
+    where
+        frames = memFrames mem
+        getVarPt' fid = let
+            frame = frames !!! fid
+            in case M.lookup k (frameContent frame) of
+                Just _ -> let
+                    frame' = frame{frameContent=M.insert k pt $ frameContent frame}
+                    in mem{memFrames=M.insert fid frame' frames}
+                Nothing -> case frameParentId frame of
+                    Just fid' -> getVarPt' fid'
+                    Nothing -> error $ "Variable not found: `" ++ k ++ "'"
 
 insertNext :: (Num k, Ord k) => k -> a -> M.Map k a -> (k, M.Map k a)
 insertNext firstKey v m = do

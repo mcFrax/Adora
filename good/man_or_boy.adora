@@ -1,11 +1,7 @@
 # Man or boy test: http://en.wikipedia.org/wiki/Man_or_boy_test
 # Implementacja oparta o: http://rosettacode.org/wiki/Man_or_boy_test#Python
 
-# U mnie dziala dla in_k<=3, niestety już dla 4 wysypuje się na przekroczeniu
-# rozmiaru stosu (2MB). Natomiast same domknięcia powinny działać dobrze.
-
-let a = fn(Int in_k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () -> Int x5) -> Int:
-    var k = in_k
+let a = fn(Int k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () -> Int x5) -> Int:
     let b = fn() -> Int:
         k = k-1
         return a(k, b, x1, x2, x3, x4)
@@ -14,14 +10,14 @@ let a = fn(Int in_k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () 
     else:
         return b()
 
-x = fn(Int i) -> Object:
+let x = fn(Int i) -> Object:
     # typy funkcji za bardzo nie działają, ale `Object`
     # daje się użyć przy braku statycznych sprawdzeń typu
     return fn(Int _) -> Int:
         return i
 
 var ii = 0
-while ii < 4:
+while ii < 11:
     print a(ii, x(1), x(-1), x(-1), x(1), x(0))
     ii = ii+1
 
@@ -30,3 +26,10 @@ while ii < 4:
 # 0
 # -2
 # 0
+# 1
+# 0
+# 1
+# -1
+# -10
+# -30
+# -67
