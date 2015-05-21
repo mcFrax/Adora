@@ -1,6 +1,6 @@
 {-# OPTIONS -XMultiParamTypeClasses #-}
 
-module Semantic where
+module Semantics where
 
 import Control.Monad
 import Control.Monad.Error.Class

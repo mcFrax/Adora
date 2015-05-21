@@ -13,7 +13,7 @@ import ErrM
 import Paradora
 import Layoutadora
 
-import Semantic
+import Semantics
 
 main :: IO ()
 main = do
