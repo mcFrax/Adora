@@ -1,0 +1,7 @@
+# powtórzona nazwa struktury
+
+struct Foo():
+    pass
+
+struct Foo():
+    pass

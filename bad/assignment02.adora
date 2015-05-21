@@ -1,0 +1,5 @@
+# przypisanie do stałej
+
+let a = 1
+
+a = 2

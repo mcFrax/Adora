@@ -1,0 +1,7 @@
+# return z wartoscią w funkcji bez typy zwracanego
+
+fn () -> Int:
+    return 42  # ok
+
+fn ():
+    return 42  # błąd

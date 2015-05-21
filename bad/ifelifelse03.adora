@@ -1,0 +1,19 @@
+# elif po else (formalnie poprawny składniowo)
+
+if true:
+    pass
+elif false:
+    pass
+elif true:  # ok
+    pass
+else:  # ok
+    pass
+
+if true:
+    pass
+elif true:
+    pass
+else:  # ok
+    pass
+elif true:  # błąd
+    pass

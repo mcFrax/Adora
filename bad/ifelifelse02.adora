@@ -1,0 +1,4 @@
+# wiszący elif (formalnie poprawny składniowo)
+
+elif true:
+    print 42

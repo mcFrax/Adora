@@ -15,9 +15,12 @@ layout ":" ;
 
 separator LowerIdent "," ;
 position token Tok_Assert 'a''s''s''e''r''t' ;
+position token Tok_Break 'b''r''e''a''k' ;
+position token Tok_Continue 'c''o''n''t''i''n''u''e' ;
 position token Tok_If 'i''f' ;
 position token Tok_Elif 'e''l''i''f' ;
 position token Tok_Else 'e''l''s''e' ;
+position token Tok_Fn 'f''n' ;
 position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
@@ -43,7 +46,6 @@ _.  Decl ::= Decl2 ;  -- declarations available everywhere
 
 _. Decl10 ::= Decl0 ;  -- declarations available in class/struct definition
 _. Decl10 ::= Decl2 ;  -- declarations available in class/struct definition
-Decl_Pass. Decl10 ::= "pass" ;
 
 -- _. Decl11 ::= Decl1 ;  -- declarations available in outside class/struct definition
 _. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definition
@@ -72,6 +74,7 @@ PropAttrName_Set.  PropAttrName ::= "set" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
 TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
+Decl_Pass. Decl2 ::= "pass" ;
 
 MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
@@ -137,8 +140,8 @@ Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
 Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
-Stmt_Break.         Stmt ::= "break" ;
-Stmt_Continue.      Stmt ::= "continue" ;
+Stmt_Break.         Stmt ::= Tok_Break ;
+Stmt_Continue.      Stmt ::= Tok_Continue ;
 Stmt_Assert.        Stmt ::= Tok_Assert Expr ;
 Stmt_Print.         Stmt ::= Tok_Print ;
 Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
@@ -165,7 +168,7 @@ separator nonempty Expr9 "," ;
 _.              Expr ::= Expr0 ;
 
 _.              Expr0 ::= Expr1 ;
-Expr_Lambda.    Expr0 ::= "fn" FnSignature StatementBlock ;
+Expr_Lambda.    Expr0 ::= Tok_Fn FnSignature StatementBlock ;
 
 _.              Expr1 ::= Expr2 ;
 Expr_If.        Expr1 ::= Tok_If Expr "then" Expr Tok_Else Expr ;

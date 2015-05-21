@@ -373,8 +373,9 @@ hoisted stmts innerSem = do
                     envClasses=M.insert strName cid beforeClasses
                 }
             return compile
-        hoistLocStmt _compilePrev (Stmt_Decl _) = do
-            error "FOooo" --TODO?
+        hoistLocStmt compilePrev (Stmt_Decl Decl_Pass) = return compilePrev
+        hoistLocStmt _compilePrev (Stmt_Decl decl) = do
+            notYet $ "Hoisting for `" ++ (printTree decl) ++ "'"
             -- _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
             -- MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
             -- ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
@@ -453,7 +454,7 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
          LValue {} -> do
             return $ mkExe $ \k -> do
                 rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
-         _ -> throwError $ SErr $ "Left side of assignment is not l-value"
+         _ -> throwError $ SErr $ "Left side of assignment is not assignable"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
 stmtSem (Stmt_Elif (Tok_Elif (pos, _)) _ _) = do
@@ -484,19 +485,19 @@ stmtSem (Stmt_While condExpr block) = do
         fix :: (a -> a) -> a
         fix f = f $ fix f
 
-stmtSem Stmt_Break = do
+stmtSem (Stmt_Break (Tok_Break (pos, _))) = do
     insideLoop <- asks envInsideLoop
     if insideLoop then
         return $ mkExe $ \_ re -> reBreak re re
     else
-        throwError $ SErr $ "Unexpected break statement"
+        throwError $ SErrP pos $ "Unexpected break statement"
 
-stmtSem Stmt_Continue = do
+stmtSem (Stmt_Continue (Tok_Continue (pos, _))) = do
     insideLoop <- asks envInsideLoop
     if insideLoop then
         return $ mkExe $ \_ re -> reContinue re re
     else
-        throwError $ SErr $ "Unexpected continue statement"
+        throwError $ SErrP pos $ "Unexpected continue statement"
 
 stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
     rType <- asks envExpectedReturnType
@@ -596,12 +597,19 @@ exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExeV ($ ValChar
 exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExeV ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
-exprSem (Expr_Var (LowerIdent (_, varName))) = do
-    -- TODO: check env
-    let cid = (stdClss M.! "Int") -- TODO TODO TODO
-        exeGet = mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
-        exeSet pt = mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
-    return $ LValue cid exeGet exeSet
+exprSem (Expr_Var (LowerIdent (pos, varName))) = do
+    vars <- asks envVars
+    case M.lookup varName vars of
+        Just (VarType mutable cid _) -> do
+            let exeGet = do
+                 mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
+            if mutable then do
+                let exeSet pt = do
+                    mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
+                return $ LValue cid exeGet exeSet
+            else do
+                return $ RValue cid exeGet
+        Nothing -> throwError $ SErrP pos $ "Undefined variable `" ++ varName ++ "'"
 
 exprSem (Expr_Not expr) = do
     exee <- exprSem expr
@@ -663,12 +671,25 @@ exprSem (Expr_Minus expr) = do
         rValue exee $ \(ValInt val) re mem -> do
             ke (ValInt $ 0 - val) re mem
 
-exprSem (Expr_Lambda signature block) = do
+exprSem (Expr_Lambda (Tok_Fn (pos, _)) signature block) = do
     (fnSgn, defArgs) <- fnSignatureSem signature
-    let makeInEnv outEnv = outEnv{
-        envExpectedReturnType=Just $ mthRetType fnSgn,
-        envInsideLoop=False
-    }
+    vars <- asks envVars
+    let
+        argVars = M.fromList $ do
+            arg <- mthArgs fnSgn
+            case arg of
+                ArgSgn (Just name) cid _ -> do
+                    return $ (name, VarType {
+                        varMutable=True,
+                        varClass=cid,
+                        varDefPos=Just pos
+                    })
+                ArgSgn Nothing _ _ -> []
+        makeInEnv outEnv = outEnv{
+            envVars=M.union vars argVars,
+            envExpectedReturnType=Just $ mthRetType fnSgn,
+            envInsideLoop=False
+        }
     exeBody <- local makeInEnv $ stmtBlockSem block
     cid <- newCid
     let lambdaVal closureFid = do

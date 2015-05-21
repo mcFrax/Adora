@@ -1,0 +1,4 @@
+# wiszący else (formalnie poprawny składniowo)
+
+else:
+    print 42

@@ -1,0 +1,3 @@
+# W zasadzie jest to poprawny kod, ale wywołujący błąd, dlatego wrzuciłem go do "bad"
+
+assert false

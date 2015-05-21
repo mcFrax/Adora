@@ -1,0 +1,7 @@
+# return bez wartosci w funkcji zwracającej wartość
+
+fn ():
+    return  # ok
+
+fn () -> Int:
+    return  # błąd

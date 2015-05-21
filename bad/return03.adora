@@ -1,0 +1,10 @@
+# return poza funkcją
+
+fn ():
+    return  # ok
+
+fn () -> Int:
+    return 42  # ok
+
+return  # błąd
+return 42  # też błąd

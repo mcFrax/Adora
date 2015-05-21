@@ -47,7 +47,13 @@ $(BnfcFiles): $(Langname).cf
 	bnfc -haskell adora.cf >/dev/null
 	touch $(BnfcFiles)  # tell `make` these files are up to date
 
-franciszek_boehlke.zip: $(patsubst %,franciszek_boehlke/%,README.pdf adora.cf stdlib.adora run-test.sh Makefile $(Examples) $(SourceHs))
+define ZipFiles
+README.pdf adora.cf stdlib.adora\
+run-test.sh run-test-bad.sh\
+Makefile $(Examples) $(SourceHs)
+endef
+
+franciszek_boehlke.zip: $(patsubst %,franciszek_boehlke/%,$(ZipFiles))
 	tar -acf franciszek_boehlke.zip franciszek_boehlke
 
 franciszek_boehlke/README.pdf: adora.pdf
@@ -62,17 +68,22 @@ franciszek_boehlke/%: %
 	mkdir -p $$(dirname "$@")
 	cp "$<" "$@"
 
-TestTargets := $(addprefix test-target-,$(GoodExamples))
+GoodTestTargets := $(addprefix test-target-,$(GoodExamples))
+BadTestTargets := $(addprefix test-target-,$(BadExamples))
+TestTargets := $(GoodTestTargets) $(BadTestTargets)
 .PHONY: test-students test-good $(TestTargets)
 
-test-students: franciszek_boehlke.zip students_test_script.sh
+test-students: franciszek_boehlke.zip students-test-script.sh
 	scp franciszek_boehlke.zip fb320589@students.mimuw.edu.pl:~/jpp/adora
-	ssh fb320589@students.mimuw.edu.pl < students_test_script.sh
+	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
 
-test-good: $(TestTargets)
+test: $(TestTargets)
 
-$(TestTargets): test-target-%: % interpreter
-	./run-test.sh "$<"
+$(GoodTestTargets): test-target-%: % interpreter
+	@./run-test.sh "$<"
+
+$(BadTestTargets): test-target-%: % interpreter
+	@./run-test-bad.sh "$<"
 
 clean:
 	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y
