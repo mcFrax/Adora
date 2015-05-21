@@ -53,8 +53,8 @@ run-test.sh run-test-bad.sh\
 Makefile $(Examples) $(SourceHs)
 endef
 
-franciszek_boehlke.zip: $(patsubst %,franciszek_boehlke/%,$(ZipFiles))
-	tar -acf franciszek_boehlke.zip franciszek_boehlke
+franciszek_boehlke.tar.gz: $(patsubst %,franciszek_boehlke/%,$(ZipFiles))
+	tar -acf franciszek_boehlke.tar.gz franciszek_boehlke
 
 franciszek_boehlke/README.pdf: adora.pdf
 	mkdir -p $$(dirname "$@")
@@ -73,8 +73,8 @@ BadTestTargets := $(addprefix test-target-,$(BadExamples))
 TestTargets := $(GoodTestTargets) $(BadTestTargets)
 .PHONY: test-students test-good $(TestTargets)
 
-test-students: franciszek_boehlke.zip students-test-script.sh
-	scp franciszek_boehlke.zip fb320589@students.mimuw.edu.pl:~/jpp/adora
+test-students: franciszek_boehlke.tar.gz students-test-script.sh
+	scp franciszek_boehlke.tar.gz fb320589@students.mimuw.edu.pl:~/jpp/adora
 	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
 
 test: $(TestTargets)
@@ -94,4 +94,4 @@ clean:
 distclean: clean
 	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* ErrM.* SharedString.* adora.dtd XMLadora.*
 	-rm -f interpreter Testadora
-	-rm -rf franciszek_boehlke.zip
+	-rm -rf franciszek_boehlke.tar.gz
