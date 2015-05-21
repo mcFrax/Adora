@@ -1,0 +1,17 @@
+# póki nie ma zmiennych łańcuchowych, wypisywanie jest dość biedne,
+# ale coś tam da się nim zrobić
+
+print true
+print false
+print 1, 2, 3, 4
+print fn():{}
+print Nil()
+print 'h', 'e', 'l', 'l', 'o', ',', ' ', 'W', 'o', 'r', 'l', 'd', '!'
+
+# EXPECTED OUTPUT #
+# true
+# false
+# 1 2 3 4
+# <function object>
+# <object>
+# 'h' 'e' 'l' 'l' 'o' ',' ' ' 'W' 'o' 'r' 'l' 'd' '!'

@@ -533,7 +533,7 @@ stmtSem (Stmt_Assert (Tok_Assert (pos, _)) expr) = do
         else
             \_ _ -> do
                 hPutStrLn stderr ("Assertion at " ++ (showPos "" pos) ++
-                                  "failed: " ++ (printTree expr))
+                                  " failed: " ++ (printTree expr))
                 exitFailure
 
 stmtSem (Stmt_Print {}) = do

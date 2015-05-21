@@ -134,7 +134,7 @@ instance Show Value where
     show (ValBool b) = if b then "true" else "false"
     show (ValInt i) = show i
     show (ValChar c) = show c
-    show (ValObject sid _attrs) = "<struct with sid " ++ (show sid) ++ ">"
+    show (ValObject _sid _attrs) = "<object>"
 
 instance NFData Value where
     rnf ValNull = ()

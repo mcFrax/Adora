@@ -1,0 +1,10 @@
+# dzielenie przez 0 jako przykład przechwycenia błędu wykonania
+
+print 0  # to się wykona
+1 // 0
+print 1  # a to już nie
+
+# EXPECTED OUTPUT #
+# 0
+# EXPECTED ERROR #
+# Runtime exception: divide by zero
