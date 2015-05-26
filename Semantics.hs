@@ -313,8 +313,7 @@ hoisted stmts innerSem = do
             let compile = do
                 compilePrev
                 glob <- gets sstGlob
-                attrs <- hoistAttrs
-                impls <- hoistImpls
+                (attrs, impls) <- hoistContents cid
                 let
                     attrsMap = M.fromList attrs
                     struct = StructDesc {
@@ -351,23 +350,40 @@ hoisted stmts innerSem = do
                     }
                     in modify $ \sst -> sst{sstGlob=glob'}
                 where
-                    hoistAttrs = do
-                        attrs <- sequence $ do
-                            decl <- decls
-                            case decl of
-                                (FieldDefinition typeExpr
-                                                (LowerIdent (pos', name))
-                                                _maybeDefault) -> return $ do
-                                    typeSem <- typeExprSem typeExpr
-                                    cid' <- case expCls typeSem of
-                                        Just (Left cid') -> return cid'
-                                        _ -> throwError $ SErrP pos' (
-                                                "typeExpr without cid?")
-                                    return (name, cid')
-                                _ -> []
-                        -- TODO check integrity
-                        return attrs
-                    hoistImpls = return M.empty
+                    hoistContents ownCid = do
+                        let initRes = (
+                                [],
+                                M.fromList [(ownCid, M.empty)])
+                                -- TODO - Object implementation? Any always present props?
+                        foldl foldDecl (return initRes) decls
+                    foldDecl acc decl@(FieldDefinition {}) = do
+                        (attrs, impls) <- acc
+                        let (FieldDefinition
+                             typeExpr
+                             (LowerIdent (pos', name))
+                             _maybeDefault) = decl
+                        typeSem <- typeExprSem typeExpr
+                        cid' <- case expCls typeSem of
+                            Just (Left cid') -> return cid'
+                            _ -> throwError $ SErrP pos' (
+                                    "typeExpr without cid?")
+                        return ((name, cid'):attrs, impls)
+                    foldDecl _ (MethodDefinition {}) = do
+                        notYet "MethodDefinition"
+                    foldDecl _ (PropertyDeclaration {}) = do
+                        notYet "PropertyDeclaration"
+                    foldDecl _ (ImplementationDefinition {}) = do
+                        notYet "ImplementationDefinition"
+                    foldDecl _ (TypeAliasDefinition {}) = do
+                        notYet "Nested types"
+                    foldDecl _ (TypeDefinition_Class {}) = do
+                        notYet "Nested types"
+                    foldDecl _ (TypeDefinition_Struct {}) = do
+                        notYet "Nested types"
+                    foldDecl _ (MethodDeclaration (Tok_Mth (pos', _)) _ _ _) = do
+                        throwError $ SErrP pos' $ ("Method declaration in struct definition " ++
+                                                   "(only definitions are allowed)")
+                    foldDecl acc Decl_Pass = acc
             modifyEnv $ \env -> env {
                     envStructs=M.insert strName sid beforeStructs,
                     envClasses=M.insert strName cid beforeClasses

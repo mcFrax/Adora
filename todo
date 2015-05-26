@@ -2,6 +2,10 @@
 == Aktualne ==
 ==============
 
+Metody i properties
+---
+
+
 - Podkreślnik jako pusty identyfikator
 - Semantyka deklaracji
     + struktur
@@ -30,7 +34,7 @@
     być properties, tylko że z autostoragem? To co prawda oznacza, że podstawowy ficzer
     systemu typów znika ;)
 - Refactoring - wcięcia, do/let
-- Refactoring - spójne nazwy (ke -> kv itp.)
+- Refactoring - spójne nazwy (ke -> kv, k -> ku, itp.)
 - Refactoring ogólny?
 
 
