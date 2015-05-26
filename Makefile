@@ -78,6 +78,7 @@ test-students: franciszek_boehlke.tar.gz students-test-script.sh
 	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
 
 test: $(TestTargets)
+	@echo "All tests passed"
 
 $(GoodTestTargets): test-target-%: % interpreter
 	@./run-test.sh "$<"

@@ -1,0 +1,19 @@
+struct Foo():
+    Int foo
+    Int bar
+
+var foo = Foo(foo=1, bar=2)
+print foo.[foo]
+print foo.[bar]
+
+foo.[foo] = 3
+foo.[bar] = 4
+
+print foo.[foo]
+print foo.[bar]
+
+# EXPECTED OUTPUT #
+# 1
+# 2
+# 3
+# 4

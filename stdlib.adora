@@ -1,6 +1,3 @@
-struct Foo():
-    Int foo
-    Bool bar
 
 struct Nil():
     pass
