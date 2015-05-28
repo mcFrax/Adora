@@ -373,7 +373,8 @@ hoisted stmts innerSem = do
                     [],
                     M.fromList [(ownCid, M.empty)])
                     -- TODO - Object implementation? Any always present props?
-            foldl foldDecl (return initRes) decls
+            (revAttrs, impls) <- foldl foldDecl (return initRes) decls
+            return (reverse revAttrs, impls)
             where
                 foldDecl acc decl@(FieldDefinition {}) = do
                     (attrs, impls) <- acc
