@@ -34,9 +34,9 @@ main = do
             hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
             exitFailure
         Ok moduleSyntax -> do
-            case moduleSem moduleSyntax of
+            case moduleSem moduleSyntax programPath of
                 Left errmsg -> do
-                    hPutStrLn stderr $ showSemError programPath errmsg
+                    hPutStrLn stderr $ showSemError errmsg
                     exitFailure
                 Right runModule -> runModule
     where

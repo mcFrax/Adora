@@ -2,6 +2,7 @@
 
 module Semantics where
 
+import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Error.Class
 import Control.Monad.Reader.Class
@@ -16,7 +17,6 @@ import System.IO
 import Absadora
 import Printadora(printTree)
 
-import ExprExe
 import Memory
 import Types
 import StdLib
@@ -29,7 +29,8 @@ data SemState = SemState {
     sstFunClasses :: M.Map () Cid,
     sstNextCid :: Cid,
     sstNextSid :: Sid,
-    sstClassRules :: [ClassRule]
+    sstClassRules :: [ClassRule],
+    sstFileName :: String
 }
 
 data ClassRule = ClassRule
@@ -98,55 +99,60 @@ modifyEnv f = setEnv =<< (liftM f ask)
 
 
 data SErr = SErr String
-          | SErrP (Int, Int) String
+          | SErrP CodePosition String
 
 instance Error SErr where
   strMsg = SErr
 
-showPos :: String -> (Int, Int) -> String
-showPos path (ln, col) = path ++ ":" ++ (show ln) ++ ":" ++ (show col)
+showSemError :: SErr -> String
+showSemError (SErr s) = "?:?:?: error: " ++ s
+showSemError (SErrP pos s) = do
+    (showPos pos) ++ ": error: " ++ s
 
-showSemError :: String -> SErr -> String
-showSemError path (SErr s) = path ++ ":?:?: error: " ++ s
-showSemError path (SErrP pos s) = do
-    (showPos path pos) ++ ": error: " ++ s
+showPos :: CodePosition -> String
+showPos (path, ln, col) = path ++ ":" ++ (show ln) ++ ":" ++ (show col)
+
+completePos :: (Int, Int) -> Semantic CodePosition
+completePos (ln, col) = do
+    fileName <- gets sstFileName
+    return (fileName, ln, col)
 
 stdClss :: M.Map String Cid
 stdClss = M.fromList [
-        ("Object", 0-0),
-        ("Bool", 0-1),
-        ("Int", 0-2),
-        ("Double", 0-3),
-        ("Char", 0-4),
-        ("Type", 0-5),
-        ("Void", 0-100)
+        ("Object", -0),
+        ("Bool", -1),
+        ("Int", -2),
+        ("Double", -3),
+        ("Char", -4),
+        ("Type", -5),
+        ("Void", -100)
     ]
 
-mkMth :: (Pointer -> FunImpl) -> PropImpl
+mkMth :: (MemPt -> FunImpl) -> PropImpl
 mkMth mth = PropImpl {
-    propGetter=(\pt -> mkExeV $ ($ ValFunction $ mth pt)),
+    propGetter=(\pt -> mkExe ($ ValFunction $ mth pt)),
     propSetter=(error "Methods are read-only properties")
 }
 
 topLevelFid :: Fid
-topLevelFid = 0
+topLevelFid = Fid 0
 
-moduleSem :: Module -> Either SErr (IO ())
-moduleSem (Module_ stmts) = do
+moduleSem :: Module -> String -> Either SErr (IO ())
+moduleSem (Module_ stmts) fileName = do
     let Module_ stdlibStmts = stdlib
     (sst0, env0, exe0) <- do
         case runSemantic (stmtSeqSem stdlibStmts) initSemState initEnv of
             Right res -> return res
             Left errmsg -> do
                 error ("Error in standard library:\n" ++
-                       (showSemError "stdlib.adora" errmsg))
-    (sst, _, exe1) <- runSemantic (stmtSeqSem stmts) sst0 env0
+                       (showSemError errmsg))
+    (sst, _, exe1) <- runSemantic (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
     let
         runEnv = RunEnv {
             reStructs=globStructs $ sstGlob sst,
-            reReturn=undefined,
-            reBreak=undefined,
-            reContinue=undefined
+            reReturn=error "return outside of function",
+            reBreak=error "break outside a loop",
+            reContinue=error "continue outside a loop"
         }
         exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
     return $ runExe exe runEnv initMem
@@ -161,14 +167,15 @@ moduleSem (Module_ stmts) = do
             sstFunClasses=M.empty,
             sstNextCid=0,
             sstNextSid=0,
-            sstClassRules=[]
+            sstClassRules=[],
+            sstFileName="<stdlib>"
         }
 
         initEnv = LocEnv {
             envSuper=Nothing,
             envVars=M.fromList [
-                ("true", VarType True (stdClss M.! "Bool") Nothing),
-                ("false", VarType False (stdClss M.! "Bool") Nothing)
+                ("true", VarType True (stdClss M.! "Bool") ("<internal>", 0, 0)),
+                ("false", VarType False (stdClss M.! "Bool") ("<internal>", 0, 0))
             ],
             envClasses=stdClss,
             envStructs=M.empty,
@@ -183,8 +190,8 @@ moduleSem (Module_ stmts) = do
 
         emptyMem = Memory {
             memFid=topLevelFid,
-            memValues=M.empty,
-            memFrames=M.fromList [(0, globFrame)]
+            memObjects=M.empty,
+            memFrames=M.fromList [(topLevelFid, globFrame)]
         } where
             globFrame = Frame{
                 frameParentId=Nothing,
@@ -223,7 +230,7 @@ stmtSeqSem stmts = do
             exeThen <-stmtBlockSem bodyBlock
             exeElse <- elseSem elses
             return $ mkExe $ \k ->
-                rValue exeCond $ \condVal ->
+                exec (expRValue exeCond) $ \condVal ->
                     if isTruthy condVal then
                         exec exeThen k
                     else
@@ -258,20 +265,20 @@ hoisted stmts innerSem = do
             (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
                 Just (Left cid) -> do
                     when (aliasName `M.member` classes) $
-                        throwError $ SErrP pos $ (
+                        throwAt pos $ (
                             "Class `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName cid classes)
                 Just (Right _ctid) -> do
-                    notYet "Just (Right ctid)"
+                    notYetAt pos "Just (Right ctid)"
                 Nothing -> return (False, classes)
             (strFound, structs') <- case expStr typeSem of
                 Just (Left sid) -> do
                     when (aliasName `M.member` structs) $
-                        throwError $ SErrP pos $ (
+                        throwAt pos $ (
                             "Struct `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName sid structs)
                 Just (Right _stid) -> do
-                    notYet "Just (Right stid)"
+                    notYetAt pos "Just (Right stid)"
                 Nothing -> return (False, structs)
             when (not $ clsFound || strFound) $ do
                 error "not $ clsFound || strFound"
@@ -286,7 +293,7 @@ hoisted stmts innerSem = do
             let UpperIdent (pos, clsName) = ident
             classes <- asks envClasses
             when (clsName `M.member` classes) $
-                throwError $ SErrP pos ("Class `" ++ clsName ++ "' already defined")
+                throwAt pos ("Class `" ++ clsName ++ "' already defined")
             assertTmplSgnEmpty mTmplSgn
             _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
             cid <- newCid
@@ -300,13 +307,14 @@ hoisted stmts innerSem = do
             beforeClasses <- asks envClasses
             beforeStructs <- asks envStructs
             when (strName `M.member` beforeClasses) $
-                throwError $ SErrP strPos ("Class `" ++ strName ++ "' already defined")
+                throwAt strPos ("Class `" ++ strName ++ "' already defined")
             when (strName `M.member` beforeStructs) $
-                throwError $ SErrP strPos ("Struct `" ++ strName ++ "' already defined")
+                throwAt strPos ("Struct `" ++ strName ++ "' already defined")
             assertTmplSgnEmpty mTmplSgn
             _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
             cid <- newCid
             sid <- newSid
+            fStrPos <- completePos strPos
             let compile = do
                 compilePrev
                 glob <- gets sstGlob
@@ -321,9 +329,7 @@ hoisted stmts innerSem = do
                         structCtor=FunImpl $ constructor
                     }
                     constructor argTuples = do
-                        mkExePt $ \kpt re mem -> let
-                            exe = mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
-                            in exec exe (\(ValInt pt) -> kpt pt) re mem
+                        mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
                     ctorSgn = FunSgn {
                         mthRetType=Just cid,
                         mthArgs=map attrToArg $ attrs
@@ -332,17 +338,17 @@ hoisted stmts innerSem = do
                         argName=Just attrName,
                         argType=attrCid,
                         argHasDefault=False,  -- TODO?
-                        argDefPos=Nothing
+                        argDefPos=fStrPos
                     }
                     exeCtorBody = mkExe $ \_ re mem -> let
                         vars = frameContent $ memFrame mem
-                        mem' = allocVar "self" ValObject {
-                                valObjStruct=sid,
-                                valObjAttrs=M.intersection vars attrsMap
+                        (pt, mem') = allocObject Object {
+                                objSid=sid,
+                                objAttrs=M.intersection vars attrsMap
                             } mem
+                        mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
                         -- TODO: execute custom contructor body/init method?
-                        pt = (getVarPt "self" mem')
-                        in (reReturn re) (ValInt pt) re mem'
+                        in (reReturn re) (ValRef pt) re mem''
                     glob' = glob{
                         globStructs=M.insert sid struct $ globStructs glob
                     }
@@ -385,7 +391,7 @@ hoisted stmts innerSem = do
                     typeSem <- typeExprSem typeExpr
                     cid' <- case expCls typeSem of
                         Just (Left cid') -> return cid'
-                        _ -> throwError $ SErrP pos (
+                        _ -> throwAt pos (
                                 "typeExpr without cid?")
                     return ((name, cid'):attrs, impls)
                 foldDecl acc (MethodDefinition mthDecl bodyBlock) = do
@@ -394,13 +400,14 @@ hoisted stmts innerSem = do
                             (LowerIdent (pos, name))
                             mTmplSgn
                             signature) = mthDecl
+                    fpos <- completePos pos
                     assertTmplSgnEmpty mTmplSgn
                     (fnSgn, defArgs) <- fnSignatureSem signature
 --                     outerVars <- asks envVars
                     let argVars = M.insert "self" (VarType {
                             varMutable=False,
                             varClass=ownCid,
-                            varDefPos=Just pos
+                            varDefPos=fpos
                         }) $ argsToVars $ mthArgs fnSgn
                     let makeInEnv outEnv = outEnv{
                             envVars=argVars, -- M.union outerVars argVars,
@@ -409,8 +416,8 @@ hoisted stmts innerSem = do
                         }
                     exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
                     let propImpl = mkMth $ \pt -> FunImpl $ \args -> do
-                            let args' = (Just "self", mkExe $ \kpt -> kpt pt):args
-                            Left $ mkCall fnSgn defArgs exeBody topLevelFid args'
+                            let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
+                            mkCall fnSgn defArgs exeBody topLevelFid args'
                     impls' <- addProp name pos propImpl [ownCid] impls
                     return (attrs, impls')
                 foldDecl _ (PropertyDeclaration {}) = do
@@ -424,7 +431,7 @@ hoisted stmts innerSem = do
                 foldDecl _ (TypeDefinition_Struct {}) = do
                     notYet "Nested types"
                 foldDecl _ (MethodDeclaration (LowerIdent (pos, _)) _ _) = do
-                    throwError $ SErrP pos $ (
+                    throwAt pos $ (
                         "Method declaration without definition in " ++
                         "struct definition")
                 foldDecl acc Decl_Pass = acc
@@ -433,18 +440,17 @@ hoisted stmts innerSem = do
         hoistVar mutable (LowerIdent (pos, varName)) compilePrev = do
             cid <- newCid
             vars <- asks envVars
+            fpos <- completePos pos
             case M.lookup varName vars of
                 Just var -> do
-                    let msg = "variable redefined: `" ++ varName ++ "'"
-                    throwError $ SErrP pos $ case varDefPos var of
-                        Just pos' -> do
-                            msg ++ "'\nPreviously defined at " ++ (showPos "" pos')
-                        Nothing -> msg
+                    throwAt pos (
+                        "variable redefined: `" ++ varName ++ "'\n" ++
+                        "Previously defined at " ++ (showPos $ varDefPos var))
                 Nothing -> do
                     let var = VarType {
                         varClass=cid,
                         varMutable=mutable,
-                        varDefPos=Just pos
+                        varDefPos=fpos
                     }
                     modifyEnv $ \env -> env{envVars=M.insert varName var vars}
                     return compilePrev
@@ -459,7 +465,7 @@ hoisted stmts innerSem = do
                         (Nothing, impl') -> do
                             return $ M.insert cid impl' impls
                         (Just _, _) -> do
-                            throwError $ SErrP pos (
+                            throwAt pos (
                                 "Property or method `" ++ name ++ "' already defined")
 
 
@@ -480,16 +486,14 @@ stmtSem (Stmt_Decl _) = return noop
 stmtSem (Stmt_Expr expr) = do
     esem <- exprSem expr
     return $ mkExe $ \k -> do
-        rValue esem $ \_ -> k ()
---         rValue esem $ \v -> do
---             io (hPutStrLn stderr $ "Stmt_Expr: " ++ (show v)) k
+        execRValue esem $ \_ -> k ()
 
 stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
     eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
     return $ mkExe $ \k -> do
-        rValue eexe $ \val re mem -> do
+        execRValue eexe $ \val re mem -> do
             k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
@@ -497,7 +501,7 @@ stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
 --     check for shadowing ...
 --     modifyEnv ...
     return $ mkExe $ \k -> do
-        rValue eexe $ \val re mem -> do
+        execRValue eexe $ \val re mem -> do
             k () re $ allocVar varName val mem
 
 stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
@@ -507,14 +511,14 @@ stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
     case lexe of
          LValue {} -> do
             return $ mkExe $ \k -> do
-                rValuePt rexe $ \pt -> exec (setLValue lexe pt) k
+                execRValue rexe $ \val -> exec (setLValue lexe val) k
          _ -> throwError $ SErr $ "Left side of assignment is not assignable"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
 stmtSem (Stmt_Elif (Tok_Elif (pos, _)) _ _) = do
-    throwError $ SErrP pos "Unexpected elif statement"
+    throwAt pos "Unexpected elif statement"
 stmtSem (Stmt_Else (Tok_Else (pos, _)) _) = do
-    throwError $ SErrP pos "Unexpected else statement"
+    throwAt pos "Unexpected else statement"
 
 stmtSem (Stmt_While condExpr block) = do
     exeCond <- exprSem condExpr
@@ -529,7 +533,7 @@ stmtSem (Stmt_While condExpr block) = do
                 reBreak=(k ()).popRe,
                 reContinue=(exec exeLoop k).popRe
             }
-            let k' = rValue exeCond $ \condVal _ -> do
+            let k' = execRValue exeCond $ \condVal _ -> do
                 if isTruthy condVal then
                     exec exeBody (\_ -> (exec exeLoop k).popRe) re'
                 else
@@ -544,14 +548,14 @@ stmtSem (Stmt_Break (Tok_Break (pos, _))) = do
     if insideLoop then
         return $ mkExe $ \_ re -> reBreak re re
     else
-        throwError $ SErrP pos $ "Unexpected break statement"
+        throwAt pos $ "Unexpected break statement"
 
 stmtSem (Stmt_Continue (Tok_Continue (pos, _))) = do
     insideLoop <- asks envInsideLoop
     if insideLoop then
         return $ mkExe $ \_ re -> reContinue re re
     else
-        throwError $ SErrP pos $ "Unexpected continue statement"
+        throwAt pos $ "Unexpected continue statement"
 
 stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
     rType <- asks envExpectedReturnType
@@ -559,34 +563,35 @@ stmtSem (Stmt_Return (Tok_Return (pos, _))) = do
         Just Nothing ->
             return $ mkExe $ \_ re -> reReturn re ValNull re
         Just _cid ->
-            throwError $ SErrP pos ("Return statement without value " ++
+            throwAt pos ("Return statement without value " ++
                                     "in funtion with return type")
         Nothing ->
-            throwError $ SErrP pos ("Unexpected return statement " ++
+            throwAt pos ("Unexpected return statement " ++
                                     "outside of function body")
 
 stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
     rType <- asks envExpectedReturnType
     case rType of
         Just Nothing ->
-            throwError $ SErrP pos ("Return statement with value " ++
+            throwAt pos ("Return statement with value " ++
                                     "in funtion returning nothing")
         Just _cid -> do
             -- TODO: check cid
             eexe <- exprSem expr
-            return $ mkExe $ \_ -> rValue eexe $ \val re -> reReturn re val re
+            return $ mkExe $ \_ -> execRValue eexe $ \val re -> reReturn re val re
         Nothing ->
-            throwError $ SErrP pos ("Unexpected return statement " ++
+            throwAt pos ("Unexpected return statement " ++
                                     "outside of function body")
 
 stmtSem (Stmt_Assert (Tok_Assert (pos, _)) expr) = do
     eexe <- exprSem expr
-    return $ mkExe $ \k -> rValue eexe $ \val -> do
+    fpos <- completePos pos
+    return $ mkExe $ \k -> execRValue eexe $ \val -> do
         if isTruthy val then
             k ()
         else
             \_ _ -> do
-                hPutStrLn stderr ("Assertion at " ++ (showPos "" pos) ++
+                hPutStrLn stderr ("Assertion at " ++ (showPos fpos) ++
                                   " failed: " ++ (printTree expr))
                 exitFailure
 
@@ -600,12 +605,12 @@ stmtSem (Stmt_PrintValues (Tok_Print (_pos, _)) exprs) = do
     return $ doPrint exprExes
     where
         doPrint [exprExe] = mkExe $ \k -> do
-            rValue exprExe $ \val re mem -> do
+            execRValue exprExe $ \val re mem -> do
                 putStr (show val)
                 putChar '\n'
                 k () re mem
         doPrint (exprExe:exprExes) = mkExe $ \k -> do
-            rValue exprExe $ \val re mem -> do
+            execRValue exprExe $ \val re mem -> do
                 putStr (show val)
                 putChar ' '
                 exec (doPrint exprExes) k re mem
@@ -621,7 +626,7 @@ stmtSem Stmt_Memdump = do
 -- Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 -- Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
 -- Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
-stmtSem stmt = notYet stmt
+stmtSem stmt = notYet $ printTree stmt
 
 
 
@@ -645,10 +650,10 @@ typeExprSem typeExpr = do
                                          "' is not a proper type name")
 
 exprSem :: Expr -> Semantic ExprSem
-exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExeV ($ ValChar c)
+exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
 -- exprSem (Expr_String c) _ =
 -- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
-exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExeV ($ ValInt $ fromInteger i)
+exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExe ($ ValInt $ fromInteger i)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (pos, varName))) = do
@@ -656,28 +661,28 @@ exprSem (Expr_Var (LowerIdent (pos, varName))) = do
     case M.lookup varName vars of
         Just (VarType mutable cid _) -> do
             let exeGet = do
-                 mkExePt $ \kpt re mem -> kpt (getVarPt varName mem) re mem
+                 mkExe $ \kv re mem -> kv (getVar varName mem) re mem
             if mutable then do
                 let exeSet pt = do
-                    mkExe $ \k re mem -> k () re (assignFrameVar varName pt mem)
+                    mkExe $ \ku re mem -> ku () re (assignVar varName pt mem)
                 return $ LValue cid exeGet exeSet
             else do
                 return $ RValue cid exeGet
-        Nothing -> throwError $ SErrP pos $ "Undefined variable `" ++ varName ++ "'"
+        Nothing -> throwAt pos $ "Undefined variable `" ++ varName ++ "'"
 
 exprSem (Expr_Not expr) = do
     exee <- exprSem expr
-    return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
-        rValue exee $ \(ValBool bval) -> do
+    return $ RValue (stdClss M.! "Bool") $ mkExe $ \ke -> do
+        execRValue exee $ \(ValBool bval) -> do
             ke $ ValBool $ not bval
 
 exprSem expr@(Expr_RelOper {}) = do
     sem' <- exprSem' expr
-    return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
+    return $ RValue (stdClss M.! "Bool") $ mkExe $ \ke -> do
         exec sem' $ \maybeVal -> do
             ke $ ValBool $ isJust maybeVal
     where
-        exprSem' :: Expr -> Semantic (Exe (Maybe Value))
+        exprSem' :: Expr -> Semantic (Exe (Maybe VarVal))
         exprSem' (Expr_RelOper exp1 oper exp2) = do
             e1exe <- exprSem' exp1
             e2exe <- exprSem exp2
@@ -685,8 +690,8 @@ exprSem expr@(Expr_RelOper {}) = do
                 exec e1exe $ \maybeVal -> do
                     case maybeVal of
                         Just val1 -> do
-                            rValue e2exe $ \val2 -> do
-                                if operFun (valToInt val1) (valToInt val2) then
+                            execRValue e2exe $ \val2 -> do
+                                if operFun (asInt val1) (asInt val2) then
                                     kmv $ Just val2
                                 else
                                     kmv Nothing
@@ -703,14 +708,7 @@ exprSem expr@(Expr_RelOper {}) = do
         exprSem' expr' = do
             exee <- exprSem expr'
             return $ mkExe $ \kmv -> do
-                rValue exee $ \v -> kmv $ Just v
---     exprSem' (Expr_RelOper exp1 oper exp2)
---     e1exe <- exprSem exp1
---     e2exe <- exprSem exp2
---     return $ RValue (stdClss M.! "Bool") $ mkExeV $ \ke -> do
---         rValue e1exe $ \(ValInt v1) -> do
---             rValue e2exe $ \(ValInt v2) -> do
---                 ke (ValBool $ operFun v1 v2)
+                execRValue exee $ \v -> kmv $ Just v
 
 exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
 exprSem (Expr_Sub exp1 exp2) = intBinopSem (-) exp1 exp2
@@ -721,8 +719,8 @@ exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
 exprSem (Expr_Minus expr) = do
     exee <- exprSem expr
     cid <- newCid
-    return $ RValue cid $ mkExeV $ \ke -> do
-        rValue exee $ \(ValInt val) re mem -> do
+    return $ RValue cid $ mkExe $ \ke -> do
+        execRValue exee $ \(ValInt val) re mem -> do
             ke (ValInt $ 0 - val) re mem
 
 exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
@@ -736,21 +734,21 @@ exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
     exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
     cid <- newCid
     let lambdaVal closureFid = do
-        ValFunction $ FunImpl $ (Left.) $ mkCall fnSgn defArgs exeBody closureFid
-    return $ RValue cid $ mkExeV $ \ke re mem -> do
+        ValFunction $ FunImpl $ mkCall fnSgn defArgs exeBody closureFid
+    return $ RValue cid $ mkExe $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
 exprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
     maybeSid <- asks $ (M.lookup typeName).envStructs
     maybeCid <- asks $ (M.lookup typeName).envClasses
     when (not $ any isJust [maybeSid, maybeCid]) $ do
-        throwError $ SErrP pos ("Undefined class name: `" ++ typeName ++ "'")
+        throwAt pos ("Undefined class name: `" ++ typeName ++ "'")
     rvalExe <- case maybeSid of
         Just sid -> do
             struct <- gets $ (!!! sid).globStructs.sstGlob
             let _strCid = structCid struct
-            return $ mkExeV $ \ke -> ke $ ValFunction $ structCtor struct
-        _ -> return $ mkExeV ($ ValNull)
+            return $ mkExe $ \ke -> ke $ ValFunction $ structCtor struct
+        Nothing -> return $ error "class reflection not implemented"
     cid <- newCid  -- cid ==> ((??) -> <struct with cid=strCid>)
     return $ TypeValue {
         expCid=cid,
@@ -764,36 +762,36 @@ exprSem (Expr_Field expr (LowerIdent (_, attrName))) = do
     let cid = (stdClss M.! "Int") -- cid <- newCid
     let
         _objCid = expCid exee
-        exeGet = mkExePt $ exeAttr $ \_objPt attrs kpt re mem -> do
-            kpt (attrs M.! attrName) re mem
-        exeSet valPt = mkExe $ exeAttr $ \objPt attrs k re mem -> let
+        exeGet = mkExe $ exeAttr $ \_objPt attrs kv -> do
+            kv (attrs M.! attrName)
+        exeSet val = mkExe $ exeAttr $ \objPt attrs ku re mem -> let
             mem' = memAdjust mem objPt $ \objVal -> objVal{
-                valObjAttrs=(M.insert attrName valPt attrs)
+                objAttrs=(M.insert attrName val attrs)
             }
-            in k () re mem'
-        exeAttr :: (Pointer -> M.Map VarName Pointer -> SemiCont a) -> SemiCont a
-        exeAttr handler k_ =  do
-            rValuePt exee $ \objPt re mem -> let
-                attrs = valObjAttrs $ memGet mem objPt
-                in handler objPt attrs k_ re mem
+            in ku () re mem'
+        exeAttr :: (MemPt -> M.Map VarName VarVal -> SemiCont a) -> SemiCont a
+        exeAttr handler ka =  do
+            execRValue exee $ \(ValRef objPt) re mem -> let
+                attrs = objAttrs $ memObjAt mem objPt
+                in handler objPt attrs ka re mem
         in return $ LValue cid exeGet exeSet
 
 exprSem (Expr_Prop expr (LowerIdent (_, propName))) = do
     exee <- exprSem expr
-    cid <- newCid
+    cid <- newCid -- TODO extract cid from objCid and globEnv
     let
         _objCid = expCid exee
-        exeGet = mkExePt $ exeProp $ \prop objPt -> do
-            execPt $ propGetter prop objPt
-        exeSet valPt = mkExe $ exeProp $ \prop objPt -> do
-            exec $ propSetter prop objPt valPt
-        exeProp :: (PropImpl -> Pointer -> SemiCont a) -> SemiCont a
-        exeProp handler k_ =  do
-            rValuePt exee $ \objPt re mem -> let
-                struct = objStruct (memGet mem objPt) re
+        exeGet = exeProp $ \prop objPt -> do
+            exec $ propGetter prop objPt
+        exeSet val = exeProp $ \prop objPt -> do
+            exec $ propSetter prop objPt val
+        exeProp :: NFData a => (PropImpl -> MemPt -> SemiCont a) -> Exe a
+        exeProp handler = mkExe $ \ka -> do
+            execRValue exee $ \(ValRef objPt) re mem -> let
+                struct = objStruct (memObjAt mem objPt) re
                 impl = (structClasses struct) !!! (structCid struct) -- objCid
                 prop = impl !!! propName
-                in (handler prop objPt) k_ re mem
+                in (handler prop objPt) ka re mem
         in return $ LValue cid exeGet exeSet
 
 exprSem (Expr_FunCall expr args) = do
@@ -804,16 +802,16 @@ exprSem (Expr_FunCall expr args) = do
     when ((S.size kwargsSet) /= (length kwargs)) $ do
         throwError $ SErr "Kwarg names not unique"
     cid <- newCid
-    return $ RValue cid $ mkExePt $ \kpt -> do
-        rValue exeFn $ \(ValFunction fnImpl) -> do
-            execPt (funBody fnImpl argTuples) kpt
+    return $ RValue cid $ mkExe $ \kv -> do
+        execRValue exeFn $ \(ValFunction fnImpl) -> do
+            exec (funBody fnImpl argTuples) kv
     where
         argSem (FunCallArg_Positional argExpr) = do
-            exeArg <- exprSem argExpr
-            return (Nothing, mkExe $ rValuePt exeArg)
+            exeArg <- liftM expRValue $ exprSem argExpr
+            return (Nothing, exeArg)
         argSem (FunCallArg_Keyword (LowerIdent (_, name)) argExpr) = do
-            exeArg <- exprSem argExpr
-            return (Just name, mkExe $ rValuePt exeArg)
+            exeArg <- liftM expRValue $ exprSem argExpr
+            return (Just name, exeArg)
         fstIsNothing = (== Nothing).fst
         unJustKwarg (Just name, exe) = return (name, exe)
         unJustKwarg (Nothing, _) = do
@@ -823,11 +821,11 @@ exprSem (Expr_Parens [expr]) = exprSem expr
 
 -- exprSem (Expr_Parens exprs) = {- tuple -}
 
-exprSem expr = notYet expr
+exprSem expr = notYet $ printTree expr
 
 
 
-fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe Pointer))
+fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe VarVal))
 fnSignatureSem (FnSignature_ args optResType) = do
     argTuples <- mapM argSem args
     retType <- case optResType of
@@ -836,7 +834,7 @@ fnSignatureSem (FnSignature_ args optResType) = do
             typeSem <- typeExprSem typeExpr
             case expCls typeSem of
                 Just (Left retCid) -> return $ Just retCid
-                _ -> throwError $ SErr ("typeExpr without cid?")
+                _ -> error "typeExpr with semantics but without cid"
     let funSgn = FunSgn {
         mthRetType=retType,
         mthArgs=(map fst argTuples)
@@ -844,11 +842,12 @@ fnSignatureSem (FnSignature_ args optResType) = do
     let defArgsMap = foldl argToMap M.empty argTuples
     return (funSgn, defArgsMap)
     where
-        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe Pointer))
+        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe VarVal))
         argSem (FunDef_Arg_ _ (LowerIdent (pos, "_")) defVal) = do
+            fpos <- completePos pos
             case defVal of
                 MaybeDefaultVal_Some _ -> do
-                    throwError $ SErrP pos ("Unnamed arguments cannot have " ++
+                    throwAt pos ("Unnamed arguments cannot have " ++
                                             "default value specified (may " ++
                                             "change in future)")
                 MaybeDefaultVal_None -> return ()
@@ -857,23 +856,21 @@ fnSignatureSem (FnSignature_ args optResType) = do
                 argName=Nothing,
                 argType=undefined,
                 argHasDefault=False,
-                argDefPos=Just pos
+                argDefPos=fpos
             }, Nothing)
         argSem (FunDef_Arg_ _ (LowerIdent (pos, name)) defVal) = do
+            fpos <- completePos pos
             -- TODO: process type
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
                 MaybeDefaultVal_Some expr -> do
-                    exee <- exprSem expr
-                    let exe = mkExe $ \kpt -> rValue exee $ \val re mem -> do
-                        let (pt, mem') = alloc val mem
-                        kpt pt re mem'
-                    return (True, Just exe)
+                    defExe <- liftM expRValue $  exprSem expr
+                    return (True, Just $ defExe)
             return $ (ArgSgn {
                 argName=Just name,
                 argType=undefined,
                 argHasDefault=hasDef,
-                argDefPos=Just pos
+                argDefPos=fpos
             }, defExe)
         argToMap m (_, Nothing) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
@@ -892,11 +889,11 @@ argsToVars args = M.fromList $ do
             })
         ArgSgn Nothing _ _ _ -> []
 
-mkCall :: FunSgn -> M.Map VarName (Exe Pointer) -> Exe () -> Fid ->
-    [(Maybe VarName, Exe Pointer)] -> Exe Value
+mkCall :: FunSgn -> M.Map VarName (Exe VarVal) -> Exe () -> Fid ->
+    [(Maybe VarName, Exe VarVal)] -> Exe VarVal
 mkCall fnSgn defArgs exeBody closureFid argTuples = do
-    mkExe $ \ke re0 mem0 -> let
-        doReturn val re mem = ke val re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
+    mkExe $ \kpt re0 mem0 -> let
+        doReturn pt re mem = kpt pt re{reReturn=reReturn re0} (setFid (memFid mem0) mem)
         re1 = re0{reReturn=doReturn}
         (fid, mem1) = allocFrame closureFid mem0
 
@@ -942,9 +939,9 @@ intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExprSem
 intBinopSem op exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
-    return $ RValue (stdClss M.! "Int") $ mkExeV $ \ke -> do
-        rValue e1exe $ \(ValInt v1) -> do
-            rValue e2exe $ \(ValInt v2) -> do
+    return $ RValue (stdClss M.! "Int") $ mkExe $ \ke -> do
+        execRValue e1exe $ \(ValInt v1) -> do
+            execRValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
 
 assertTmplSgnEmpty :: MaybeTemplateSgn -> Semantic ()
@@ -953,5 +950,13 @@ assertTmplSgnEmpty mTmplSgn =
         MaybeTemplateSgn_Some (_:_) -> notYet "Templates"
         _ -> return ()
 
+throwAt :: (Int, Int) -> String -> Semantic a
+throwAt (ln, col) msg = do
+    fileName <- gets sstFileName
+    throwError $ SErrP (fileName, ln, col) msg
+
 notYet :: Show a => a -> Semantic b
 notYet = throwError.(SErr).("not yet: " ++).show
+
+notYetAt :: Show a => (Int, Int) -> a -> Semantic b
+notYetAt pos what = throwAt pos $ "not yet: " ++ (show what)

@@ -68,22 +68,22 @@ franciszek_boehlke/%: %
 	mkdir -p $$(dirname "$@")
 	cp "$<" "$@"
 
-GoodTestTargets := $(addprefix test-target-,$(GoodExamples))
-BadTestTargets := $(addprefix test-target-,$(BadExamples))
-TestTargets := $(GoodTestTargets) $(BadTestTargets)
-.PHONY: test-students test-good $(TestTargets)
+GoodTestCases := $(addprefix test-case-,$(GoodExamples))
+BadTestCases := $(addprefix test-case-,$(BadExamples))
+TestCases := $(GoodTestCases) $(BadTestCases)
+.PHONY: test-students test-good $(TestCases)
 
 test-students: franciszek_boehlke.tar.gz students-test-script.sh
 	scp franciszek_boehlke.tar.gz fb320589@students.mimuw.edu.pl:~/jpp/adora
 	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
 
-test: $(TestTargets)
+test: $(TestCases)
 	@echo "All tests passed"
 
-$(GoodTestTargets): test-target-%: % interpreter
+$(GoodTestCases): test-case-%: % interpreter
 	@./run-test.sh "$<"
 
-$(BadTestTargets): test-target-%: % interpreter
+$(BadTestCases): test-case-%: % interpreter
 	@./run-test-bad.sh "$<"
 
 clean:

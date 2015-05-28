@@ -12,7 +12,10 @@ import Absadora
 -- Environment
 -- -- --
 
-type CodePosition = Maybe (Int, Int)
+type CodePosition = (String, Int, Int)
+
+internalCodePos :: CodePosition
+internalCodePos = ("<internal>", 0, 0)
 
 type VarName = String
 data VarType = VarType {
@@ -46,13 +49,10 @@ data GlobEnv = GlobEnv {
 
 data RunEnv = RunEnv {
     reStructs :: SidMap,
-    reReturn :: Value -> Cont,
+    reReturn :: VarVal -> Cont,
     reBreak :: Cont,
     reContinue :: Cont
 }
-
-instance NFData RunEnv
--- TODO?
 
 data ClassDesc = ClassDesc {
     className :: String,
@@ -85,15 +85,15 @@ data StructDesc = StructDesc {
 type Impl = M.Map VarName PropImpl  -- both props and mths
 
 data PropImpl = PropImpl {
-    propGetter :: Pointer -> Either (Exe Value) (Exe Pointer),
-    propSetter :: Pointer -> Pointer -> Exe ()  -- possibly undefined/error
+    propGetter :: MemPt -> Exe VarVal,
+    propSetter :: MemPt -> VarVal -> Exe ()  -- possibly undefined/error
 }
 
 instance Show PropImpl where
     show _ = "<PropImpl>"
 
 newtype FunImpl = FunImpl {
-    funBody :: [(Maybe VarName, Exe Pointer)] -> Either (Exe Value) (Exe Pointer)
+    funBody :: [(Maybe VarName, Exe VarVal)] -> Exe VarVal
 }
 
 instance Show FunImpl where
@@ -104,51 +104,68 @@ instance Show FunImpl where
 -- Memory
 -- -- --
 
-type Fid = Int
-type Pointer = Int
+newtype Fid = Fid Int deriving (Eq, Ord, Show)
+newtype MemPt = MemPt Int deriving (Eq, Ord, Show)
 data Memory = Memory {
     memFid :: Fid,  -- current frame fid
-    memValues :: M.Map Pointer Value,
+    memObjects :: M.Map MemPt Object,
     memFrames :: M.Map Fid Frame
 } deriving Show
-
-instance NFData Memory
--- TODO?
 
 type FrameKey = VarName
 data Frame = Frame {
     frameParentId :: Maybe Fid,
-    frameContent :: M.Map FrameKey Pointer  -- frame index -> memory index
+    frameContent :: M.Map FrameKey VarVal
 } deriving Show
 
-data Value = ValNull
+data VarVal = ValNull
+           | ValRef MemPt
            | ValFunction FunImpl
-           | ValBool { valToBool :: Bool }
-           | ValInt { valToInt :: Int }
-           | ValChar { valToChar :: Char }
-           | ValObject {
-                valObjStruct :: Sid,
-                valObjAttrs :: M.Map VarName Pointer
-             }
+           | ValBool { asBool :: Bool }
+           | ValInt { asInt :: Int }
+           | ValChar { asChar :: Char }
 
-instance Show Value where
+instance Show VarVal where
     show ValNull = "null"
+    show (ValRef (MemPt ptVal)) = "<object@" ++ (show ptVal) ++ ">"
     show (ValFunction _) = "<function object>"
     show (ValBool b) = if b then "true" else "false"
     show (ValInt i) = show i
     show (ValChar c) = show c
-    show (ValObject _sid _attrs) = "<object>"
 
-instance NFData Value where
+instance NFData VarVal where
     rnf ValNull = ()
+    rnf (ValRef (MemPt ptVal)) = rnf ptVal
     rnf (ValFunction _) = ()
-    rnf (ValBool b) = (ValBool $! b) `seq` ()
-    rnf (ValInt i) = (ValInt $! i) `seq` ()
-    rnf (ValChar c) = (ValChar $! c) `seq` ()
-    rnf (ValObject sid attrs) = ((ValObject $! sid) $!! attrs) `seq` ()
+    rnf (ValBool b) = rnf b
+    rnf (ValInt i) = rnf i
+    rnf (ValChar c) = rnf c
 
-objStruct :: Value -> RunEnv -> StructDesc
-objStruct objVal re = (reStructs re) M.! (valObjStruct objVal)
+
+isTruthy :: VarVal -> Bool
+isTruthy ValNull = False
+isTruthy (ValRef _) = True
+isTruthy (ValFunction _) = True
+isTruthy (ValBool val) = val
+isTruthy (ValInt 0) = False
+isTruthy (ValInt _) = True
+isTruthy (ValChar '\0') = False
+isTruthy (ValChar _) = True
+
+
+data Object = Object {
+    objSid :: Sid,
+    objAttrs :: M.Map VarName VarVal
+}
+
+instance Show Object where
+    show _ = "<object>"
+
+instance NFData Object where
+    rnf (Object sid attrs) = (rnf sid) `seq` (rnf attrs)
+
+objStruct :: Object -> RunEnv -> StructDesc
+objStruct obj re = (reStructs re) M.! (objSid obj)
 
 
 class Eval e where
@@ -169,12 +186,8 @@ newtype Exe a = Exe {
 mkExe :: (NFData a) => SemiCont a -> Exe a
 mkExe exe = do
     Exe $!! \ka -> exe $!! \a re mem -> do
-        (a', re', mem') <- handle handler $ do
-            a' <- evaluate $!! a
-            re' <- evaluate $!! re
-            mem' <- evaluate $!! mem
-            return (a', re', mem')
-        ka a' re' mem'
+        a' <- handle handler $ evaluate $!! a
+        ka a' re mem
     where
         handler :: SomeException -> IO a
         handler exception = do
@@ -195,14 +208,17 @@ noop = mkExe ($ ())
 
 data ExprSem = RValue {
                 expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer)
+                expRValue :: Exe VarVal
             } | LValue {
                 expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer),
-                setLValue :: Pointer -> Exe ()
+                expRValue :: Exe VarVal,
+                setLValue :: VarVal -> Exe ()
             } | TypeValue {
                 expCid :: Cid,
-                expRValue :: Either (Exe Value) (Exe Pointer), -- reflection only
+                expRValue :: Exe VarVal, -- reflection only
                 expCls :: Maybe (Either Cid CTid),
                 expStr :: Maybe (Either Sid STid)
             }
+
+execRValue :: ExprSem -> SemiCont VarVal
+execRValue = exec.expRValue

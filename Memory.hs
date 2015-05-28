@@ -15,28 +15,25 @@ m !!! kk = do
 memFrame :: Memory -> Frame
 memFrame mem = (memFrames mem) !!! (memFid mem)
 
-memGet :: Memory -> Pointer -> Value
-memGet mem pt = (memValues mem) !!! pt
+memObjAt :: Memory -> MemPt -> Object
+memObjAt mem pt = (memObjects mem) !!! pt
 
-memSet :: Memory -> Pointer -> Value -> Memory
-memSet mem pt v = mem{memValues=M.insert pt v (memValues mem)}
+memSetObj :: Memory -> MemPt -> Object -> Memory
+memSetObj mem pt obj = mem{memObjects=M.insert pt obj (memObjects mem)}
 
-memAdjust :: Memory -> Pointer -> (Value -> Value) -> Memory
-memAdjust mem pt f = mem{memValues=M.adjust f pt (memValues mem)}
+memAdjust :: Memory -> MemPt -> (Object -> Object) -> Memory
+memAdjust mem pt f = mem{memObjects=M.adjust f pt (memObjects mem)}
 
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
 
-nextPtr :: Memory -> Pointer
-nextPtr mem = do
-    if M.null vals then 0 else (fst $ M.findMax vals) + 1
-    where
-        vals = memValues mem
+nextPtr :: Memory -> MemPt
+nextPtr mem = nextKey $ memObjects mem
 
-alloc :: Value -> Memory -> (Pointer, Memory)
-alloc v mem = do
-    let (pt, values) = insertNext 0 v $ memValues mem
-    (pt, mem{memValues=values})
+allocObject :: Object -> Memory -> (MemPt, Memory)
+allocObject obj mem = do
+    let (pt, values) = insertNext obj $ memObjects mem
+    (pt, mem{memObjects=values})
 
 allocFrame :: Fid -> Memory -> (Fid, Memory)
 allocFrame closureFid mem = do
@@ -44,43 +41,35 @@ allocFrame closureFid mem = do
         frameParentId=Just closureFid,
         frameContent=M.empty
     }
-    let (fid, frames) = insertNext 0 frame $ memFrames mem
+    let (fid, frames) = insertNext frame $ memFrames mem
     (fid, mem{memFrames=frames})
 
 popFrame :: Memory -> Memory
 popFrame mem = mem{memFid=(\(Just fid') -> fid') $ frameParentId $ memFrame mem}
 
-getVarPt :: FrameKey -> Memory -> Pointer
-getVarPt k mem = do
-    getVarPt' $ memFrame mem
+getVar :: FrameKey -> Memory -> VarVal
+getVar k mem = do
+    getVar' $ memFrame mem
     where
         frames = memFrames mem
-        getVarPt' f = do
+        getVar' f = do
             case M.lookup k (frameContent f) of
-                Just pt -> pt
-                Nothing -> getVarPt' (frames !!! ((\(Just fid') -> fid') $ frameParentId f))
+                Just val -> val
+                Nothing -> getVar' (frames !!! ((\(Just fid') -> fid') $ frameParentId f))
 
-getVar :: FrameKey -> Memory -> Value
-getVar k mem = memGet mem $ getVarPt k mem
+allocVar :: FrameKey -> VarVal -> Memory -> Memory
+allocVar k pt mem =
+    allocFrameVar (memFid mem) k pt mem
 
-allocVar :: FrameKey -> Value -> Memory -> Memory
-allocVar k v mem = do
-    allocVarFid (memFid mem) k v mem
-
-allocVarFid :: Fid -> FrameKey -> Value -> Memory -> Memory
-allocVarFid fid k v mem = do
-    let (pt, mem') = alloc v mem
-    allocFrameVar fid k pt mem'
-
-allocFrameVar :: Fid -> FrameKey -> Pointer -> Memory -> Memory
+allocFrameVar :: Fid -> FrameKey -> VarVal -> Memory -> Memory
 allocFrameVar fid k pt mem = do
     let frames = memFrames mem
     let frame = frames !!! fid
     let frame' = frame{frameContent=M.insert k pt $ frameContent frame}
     mem{memFrames=M.insert fid frame' frames}
 
-assignFrameVar :: FrameKey -> Pointer -> Memory -> Memory
-assignFrameVar k pt mem = do
+assignVar :: FrameKey -> VarVal -> Memory -> Memory
+assignVar k val mem = do
     getVarPt' $ memFid mem
     where
         frames = memFrames mem
@@ -88,14 +77,32 @@ assignFrameVar k pt mem = do
             frame = frames !!! fid
             in case M.lookup k (frameContent frame) of
                 Just _ -> let
-                    frame' = frame{frameContent=M.insert k pt $ frameContent frame}
+                    frame' = frame{frameContent=M.insert k val $ frameContent frame}
                     in mem{memFrames=M.insert fid frame' frames}
                 Nothing -> case frameParentId frame of
                     Just fid' -> getVarPt' fid'
                     Nothing -> error $ "Variable not found: `" ++ k ++ "'"
 
-insertNext :: (Num k, Ord k) => k -> a -> M.Map k a -> (k, M.Map k a)
-insertNext firstKey v m = do
-    (key, M.insert key v m)
-    where
-        key = if M.null m then firstKey else (fst $ M.findMax m) + 1
+class Ord k => MemKey k where
+    firstKey :: k
+    keySuccessor :: k -> k
+
+instance MemKey MemPt where
+    firstKey = MemPt 0
+    keySuccessor (MemPt pt) = MemPt $ pt + 1
+
+instance MemKey Fid where
+    firstKey = Fid 0
+    keySuccessor (Fid pt) = Fid $ pt + 1
+
+insertNext :: MemKey k => a -> M.Map k a -> (k, M.Map k a)
+insertNext v m = let
+    key = nextKey m
+    in (key, M.insert key v m)
+
+nextKey :: MemKey k => M.Map k a -> k
+nextKey m = do
+    if M.null m
+        then
+            firstKey
+        else keySuccessor $ fst $ M.findMax m

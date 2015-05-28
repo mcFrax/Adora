@@ -68,8 +68,8 @@ type Store = M.Map Location Value
 
 type AttrDict = M.Map VarName ALocation
 
-data Value = AVInt { valToInt :: Int }
-            | AVChar { valToChar :: Int }
+data Value = AVInt { asInt :: Int }
+            | AVChar { asChar :: Int }
             | AVObject { valObjAttrs :: AttrDict }
 
 

@@ -1,0 +1,19 @@
+var c = Cons(1, Nil()) # Cons i Nil są z stdlib.adora
+
+let f = fn () -> Cons:
+    return c
+
+var d = f()
+
+print c.[head]
+print d.[head]
+
+c.[head] = 2
+print c.[head]
+print d.[head]
+
+# EXPECTED OUTPUT #
+# 1
+# 1
+# 2
+# 2
