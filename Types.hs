@@ -25,10 +25,10 @@ data VarType = VarType {
     varDefPos :: CodePosition
 } deriving Show
 
-type Cid = Int -- class id
-type Sid = Int -- struct id
-type CTid = Int
-type STid = Int
+newtype Cid = Cid Int deriving (Eq, Ord, Show) -- class id
+newtype Sid = Sid Int deriving (Eq, Ord, Show) -- struct id
+newtype CTid = CTid Int deriving (Eq, Ord, Show)
+newtype STid = STid Int deriving (Eq, Ord, Show)
 
 type CidMap = M.Map Cid ClassDesc
 type SidMap = M.Map Sid StructDesc
@@ -162,7 +162,7 @@ instance Show Object where
     show _ = "<object>"
 
 instance NFData Object where
-    rnf (Object sid attrs) = (rnf sid) `seq` (rnf attrs)
+    rnf (Object _sid attrs) = rnf attrs
 
 objStruct :: Object -> RunEnv -> StructDesc
 objStruct obj re = (reStructs re) M.! (objSid obj)

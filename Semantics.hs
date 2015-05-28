@@ -51,15 +51,15 @@ addRule rule = do
 newCid :: Semantic Cid
 newCid = do
     stt <- get
-    let cid = sstNextCid stt
-    put stt{sstNextCid=cid+1}
+    let cid@(Cid cidVal) = sstNextCid stt
+    put stt{sstNextCid=Cid $ cidVal + 1}
     return cid
 
 newSid :: Semantic Sid
 newSid = do
     stt <- get
-    let sid = sstNextSid stt
-    put stt{sstNextSid=sid+1}
+    let sid@(Sid sidVal) = sstNextSid stt
+    put stt{sstNextSid=Sid $ sidVal + 1}
     return sid
 
 
@@ -118,7 +118,7 @@ completePos (ln, col) = do
     return (fileName, ln, col)
 
 stdClss :: M.Map String Cid
-stdClss = M.fromList [
+stdClss = M.fromList $ map (\(n, cv) -> (n, Cid cv)) [
         ("Object", -0),
         ("Bool", -1),
         ("Int", -2),
@@ -165,8 +165,8 @@ moduleSem (Module_ stmts) fileName = do
             sstStructTmpls=(M.empty, M.empty),
             sstClassTmpls=(M.empty, M.empty),
             sstFunClasses=M.empty,
-            sstNextCid=0,
-            sstNextSid=0,
+            sstNextCid=Cid 0,
+            sstNextSid=Sid 0,
             sstClassRules=[],
             sstFileName="<stdlib>"
         }
@@ -741,7 +741,7 @@ exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
 exprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
     maybeSid <- asks $ (M.lookup typeName).envStructs
     maybeCid <- asks $ (M.lookup typeName).envClasses
-    when (not $ any isJust [maybeSid, maybeCid]) $ do
+    when (isNothing maybeSid && isNothing maybeCid) $ do
         throwAt pos ("Undefined class name: `" ++ typeName ++ "'")
     rvalExe <- case maybeSid of
         Just sid -> do
