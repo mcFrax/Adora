@@ -128,6 +128,9 @@ mkMth mth = PropImpl {
     propSetter=(error "Methods are read-only properties")
 }
 
+topLevelFid :: Fid
+topLevelFid = 0
+
 moduleSem :: Module -> Either SErr (IO ())
 moduleSem (Module_ stmts) = do
     let Module_ stdlibStmts = stdlib
@@ -179,7 +182,7 @@ moduleSem (Module_ stmts) = do
             ]
 
         emptyMem = Memory {
-            memFid=0,
+            memFid=topLevelFid,
             memValues=M.empty,
             memFrames=M.fromList [(0, globFrame)]
         } where
@@ -254,7 +257,7 @@ hoisted stmts innerSem = do
             typeSem <- typeExprSem typeExpr
             (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
                 Just (Left cid) -> do
-                    when (isJust $ M.lookup aliasName classes) $
+                    when (aliasName `M.member` classes) $
                         throwError $ SErrP pos $ (
                             "Class `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName cid classes)
@@ -263,7 +266,7 @@ hoisted stmts innerSem = do
                 Nothing -> return (False, classes)
             (strFound, structs') <- case expStr typeSem of
                 Just (Left sid) -> do
-                    when (isJust $ M.lookup aliasName structs) $
+                    when (aliasName `M.member` structs) $
                         throwError $ SErrP pos $ (
                             "Struct `" ++ aliasName ++ "' already exists")
                     return (True, M.insert aliasName sid structs)
@@ -282,12 +285,9 @@ hoisted stmts innerSem = do
             let (TypeDefinition_Class ident mTmplSgn superClsExprs _variants _decls) = clsDef
             let UpperIdent (pos, clsName) = ident
             classes <- asks envClasses
-            when (isJust $ M.lookup clsName classes) $
+            when (clsName `M.member` classes) $
                 throwError $ SErrP pos ("Class `" ++ clsName ++ "' already defined")
-            case mTmplSgn of
-                MaybeTemplateSgn_None -> do
-                    return ()  -- TODO?
-                MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
+            assertTmplSgnEmpty mTmplSgn
             _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
             cid <- newCid
             modifyEnv $ \env -> env {
@@ -296,24 +296,21 @@ hoisted stmts innerSem = do
             return compilePrev
         hoistLocStmt compilePrev (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
             let (TypeDefinition_Struct ident mTmplSgn superStrExprs decls) = strDef
-            let UpperIdent (pos, strName) = ident
+            let UpperIdent (strPos, strName) = ident
             beforeClasses <- asks envClasses
             beforeStructs <- asks envStructs
-            when (isJust $ M.lookup strName beforeClasses) $
-                throwError $ SErrP pos ("Class `" ++ strName ++ "' already defined")
-            when (isJust $ M.lookup strName beforeStructs) $
-                throwError $ SErrP pos ("Struct `" ++ strName ++ "' already defined")
-            case mTmplSgn of
-                MaybeTemplateSgn_None -> do
-                    return ()  -- TODO?
-                MaybeTemplateSgn_Some _params -> notYet "MaybeTemplateSgn_Some"
+            when (strName `M.member` beforeClasses) $
+                throwError $ SErrP strPos ("Class `" ++ strName ++ "' already defined")
+            when (strName `M.member` beforeStructs) $
+                throwError $ SErrP strPos ("Struct `" ++ strName ++ "' already defined")
+            assertTmplSgnEmpty mTmplSgn
             _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
             cid <- newCid
             sid <- newSid
             let compile = do
                 compilePrev
                 glob <- gets sstGlob
-                (attrs, impls) <- hoistContents cid
+                (attrs, impls) <- hoistStrContents cid decls
                 let
                     attrsMap = M.fromList attrs
                     struct = StructDesc {
@@ -325,7 +322,7 @@ hoisted stmts innerSem = do
                     }
                     constructor argTuples = do
                         mkExePt $ \kpt re mem -> let
-                            exe = mkCall ctorSgn M.empty exeCtorBody (0-1) argTuples
+                            exe = mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
                             in exec exe (\(ValInt pt) -> kpt pt) re mem
                     ctorSgn = FunSgn {
                         mthRetType=Just cid,
@@ -334,7 +331,8 @@ hoisted stmts innerSem = do
                     attrToArg (attrName, attrCid) = ArgSgn {
                         argName=Just attrName,
                         argType=attrCid,
-                        argHasDefault=False  -- TODO?
+                        argHasDefault=False,  -- TODO?
+                        argDefPos=Nothing
                     }
                     exeCtorBody = mkExe $ \_ re mem -> let
                         vars = frameContent $ memFrame mem
@@ -349,41 +347,6 @@ hoisted stmts innerSem = do
                         globStructs=M.insert sid struct $ globStructs glob
                     }
                     in modify $ \sst -> sst{sstGlob=glob'}
-                where
-                    hoistContents ownCid = do
-                        let initRes = (
-                                [],
-                                M.fromList [(ownCid, M.empty)])
-                                -- TODO - Object implementation? Any always present props?
-                        foldl foldDecl (return initRes) decls
-                    foldDecl acc decl@(FieldDefinition {}) = do
-                        (attrs, impls) <- acc
-                        let (FieldDefinition
-                             typeExpr
-                             (LowerIdent (pos', name))
-                             _maybeDefault) = decl
-                        typeSem <- typeExprSem typeExpr
-                        cid' <- case expCls typeSem of
-                            Just (Left cid') -> return cid'
-                            _ -> throwError $ SErrP pos' (
-                                    "typeExpr without cid?")
-                        return ((name, cid'):attrs, impls)
-                    foldDecl _ (MethodDefinition {}) = do
-                        notYet "MethodDefinition"
-                    foldDecl _ (PropertyDeclaration {}) = do
-                        notYet "PropertyDeclaration"
-                    foldDecl _ (ImplementationDefinition {}) = do
-                        notYet "ImplementationDefinition"
-                    foldDecl _ (TypeAliasDefinition {}) = do
-                        notYet "Nested types"
-                    foldDecl _ (TypeDefinition_Class {}) = do
-                        notYet "Nested types"
-                    foldDecl _ (TypeDefinition_Struct {}) = do
-                        notYet "Nested types"
-                    foldDecl _ (MethodDeclaration (Tok_Mth (pos', _)) _ _ _) = do
-                        throwError $ SErrP pos' $ ("Method declaration in struct definition " ++
-                                                   "(only definitions are allowed)")
-                    foldDecl acc Decl_Pass = acc
             modifyEnv $ \env -> env {
                     envStructs=M.insert strName sid beforeStructs,
                     envClasses=M.insert strName cid beforeClasses
@@ -404,6 +367,67 @@ hoisted stmts innerSem = do
             -- TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [Expr9] ")" ":" "{" [Decl10] "}" ;
         hoistLocStmt compilePrev _stmt = return compilePrev
 
+        hoistStrContents :: Cid -> [Decl] -> Semantic ([(VarName, Cid)], M.Map Cid Impl)
+        hoistStrContents ownCid decls = do
+            let initRes = (
+                    [],
+                    M.fromList [(ownCid, M.empty)])
+                    -- TODO - Object implementation? Any always present props?
+            foldl foldDecl (return initRes) decls
+            where
+                foldDecl acc decl@(FieldDefinition {}) = do
+                    (attrs, impls) <- acc
+                    let (FieldDefinition
+                            typeExpr
+                            (LowerIdent (pos, name))
+                            _maybeDefault) = decl
+                    typeSem <- typeExprSem typeExpr
+                    cid' <- case expCls typeSem of
+                        Just (Left cid') -> return cid'
+                        _ -> throwError $ SErrP pos (
+                                "typeExpr without cid?")
+                    return ((name, cid'):attrs, impls)
+                foldDecl acc (MethodDefinition mthDecl bodyBlock) = do
+                    (attrs, impls) <- acc
+                    let (MethodDeclaration
+                            (LowerIdent (pos, name))
+                            mTmplSgn
+                            signature) = mthDecl
+                    assertTmplSgnEmpty mTmplSgn
+                    (fnSgn, defArgs) <- fnSignatureSem signature
+--                     outerVars <- asks envVars
+                    let argVars = M.insert "self" (VarType {
+                            varMutable=False,
+                            varClass=ownCid,
+                            varDefPos=Just pos
+                        }) $ argsToVars $ mthArgs fnSgn
+                    let makeInEnv outEnv = outEnv{
+                            envVars=argVars, -- M.union outerVars argVars,
+                            envExpectedReturnType=Just $ mthRetType fnSgn,
+                            envInsideLoop=False
+                        }
+                    exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
+                    let propImpl = mkMth $ \pt -> FunImpl $ \args -> do
+                            let args' = (Just "self", mkExe $ \kpt -> kpt pt):args
+                            Left $ mkCall fnSgn defArgs exeBody topLevelFid args'
+                    impls' <- addProp name pos propImpl [ownCid] impls
+                    return (attrs, impls')
+                foldDecl _ (PropertyDeclaration {}) = do
+                    notYet "PropertyDeclaration"
+                foldDecl _ (ImplementationDefinition {}) = do
+                    notYet "ImplementationDefinition"
+                foldDecl _ (TypeAliasDefinition {}) = do
+                    notYet "Nested types"
+                foldDecl _ (TypeDefinition_Class {}) = do
+                    notYet "Nested types"
+                foldDecl _ (TypeDefinition_Struct {}) = do
+                    notYet "Nested types"
+                foldDecl _ (MethodDeclaration (LowerIdent (pos, _)) _ _) = do
+                    throwError $ SErrP pos $ (
+                        "Method declaration without definition in " ++
+                        "struct definition")
+                foldDecl acc Decl_Pass = acc
+
         hoistVar :: Bool -> LowerIdent -> Semantic () -> Semantic (Semantic ())
         hoistVar mutable (LowerIdent (pos, varName)) compilePrev = do
             cid <- newCid
@@ -423,6 +447,19 @@ hoisted stmts innerSem = do
                     }
                     modifyEnv $ \env -> env{envVars=M.insert varName var vars}
                     return compilePrev
+
+        addProp :: VarName -> (Int, Int) -> PropImpl -> [Cid] -> M.Map Cid Impl
+            -> Semantic (M.Map Cid Impl)
+        addProp name pos propImpl cids impls0 = do
+            foldl (>>=) (return impls0) (map addProp' cids)
+            where
+                addProp' cid impls = do
+                    case M.insertLookupWithKey (\_ _ x -> x) name propImpl $ impls M.! cid of
+                        (Nothing, impl') -> do
+                            return $ M.insert cid impl' impls
+                        (Just _, _) -> do
+                            throwError $ SErrP pos (
+                                "Property or method `" ++ name ++ "' already defined")
 
 
 
@@ -687,26 +724,15 @@ exprSem (Expr_Minus expr) = do
         rValue exee $ \(ValInt val) re mem -> do
             ke (ValInt $ 0 - val) re mem
 
-exprSem (Expr_Lambda (Tok_Fn (pos, _)) signature block) = do
+exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
     (fnSgn, defArgs) <- fnSignatureSem signature
     vars <- asks envVars
-    let
-        argVars = M.fromList $ do
-            arg <- mthArgs fnSgn
-            case arg of
-                ArgSgn (Just name) cid _ -> do
-                    return $ (name, VarType {
-                        varMutable=True,
-                        varClass=cid,
-                        varDefPos=Just pos
-                    })
-                ArgSgn Nothing _ _ -> []
-        makeInEnv outEnv = outEnv{
-            envVars=M.union vars argVars,
+    let makeInEnv outEnv = outEnv{
+            envVars=M.union vars (argsToVars $ mthArgs fnSgn),
             envExpectedReturnType=Just $ mthRetType fnSgn,
             envInsideLoop=False
         }
-    exeBody <- local makeInEnv $ stmtBlockSem block
+    exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
     cid <- newCid
     let lambdaVal closureFid = do
         ValFunction $ FunImpl $ (Left.) $ mkCall fnSgn defArgs exeBody closureFid
@@ -829,9 +855,10 @@ fnSignatureSem (FnSignature_ args optResType) = do
             return $ (ArgSgn {
                 argName=Nothing,
                 argType=undefined,
-                argHasDefault=False
+                argHasDefault=False,
+                argDefPos=Just pos
             }, Nothing)
-        argSem (FunDef_Arg_ _ (LowerIdent (_, name)) defVal) = do
+        argSem (FunDef_Arg_ _ (LowerIdent (pos, name)) defVal) = do
             -- TODO: process type
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
@@ -844,11 +871,25 @@ fnSignatureSem (FnSignature_ args optResType) = do
             return $ (ArgSgn {
                 argName=Just name,
                 argType=undefined,
-                argHasDefault=hasDef
+                argHasDefault=hasDef,
+                argDefPos=Just pos
             }, defExe)
         argToMap m (_, Nothing) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
+
+
+argsToVars :: [ArgSgn] -> M.Map VarName VarType
+argsToVars args = M.fromList $ do
+    arg <- args
+    case arg of
+        ArgSgn (Just name) cid _ _ -> do
+            return $ (name, VarType {
+                varMutable=True,
+                varClass=cid,
+                varDefPos=argDefPos arg
+            })
+        ArgSgn Nothing _ _ _ -> []
 
 mkCall :: FunSgn -> M.Map VarName (Exe Pointer) -> Exe () -> Fid ->
     [(Maybe VarName, Exe Pointer)] -> Exe Value
@@ -904,6 +945,12 @@ intBinopSem op exp1 exp2 = do
         rValue e1exe $ \(ValInt v1) -> do
             rValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
+
+assertTmplSgnEmpty :: MaybeTemplateSgn -> Semantic ()
+assertTmplSgnEmpty mTmplSgn =
+    case mTmplSgn of
+        MaybeTemplateSgn_Some (_:_) -> notYet "Templates"
+        _ -> return ()
 
 notYet :: Show a => a -> Semantic b
 notYet = throwError.(SErr).("not yet: " ++).show

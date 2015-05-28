@@ -1,0 +1,29 @@
+struct Foo():
+    Int foo
+    Int bar
+    mth setBoth (Int foo, Int bar):
+        self.[foo] = foo
+        self.[bar] = bar
+    mth sum () -> Int:
+        return self.[foo] + self.[bar]
+
+var foo = Foo(foo=1, bar=2)
+
+print foo.[foo]
+print foo.[bar]
+print foo.sum()
+
+foo.setBoth(3, 4)
+foo.[bar] = 4
+
+print foo.[foo]
+print foo.[bar]
+print foo.sum()
+
+# EXPECTED OUTPUT #
+# 1
+# 2
+# 3
+# 3
+# 4
+# 7

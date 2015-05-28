@@ -21,7 +21,6 @@ position token Tok_If 'i''f' ;
 position token Tok_Elif 'e''l''i''f' ;
 position token Tok_Else 'e''l''s''e' ;
 position token Tok_Fn 'f''n' ;
-position token Tok_Mth 'm''t''h' ;
 position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Pro 'p''r''o' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
@@ -68,14 +67,11 @@ PropDefClause_Undef.    PropDefClause ::= "undefined" ;
 MaybePropAttrDef_None.   MaybePropAttrDef ::= ;
 MaybePropAttrDef_Some.   MaybePropAttrDef ::= StatementBlock ;
 
-PropAttrName_Get.  PropAttrName ::= "get" ;
-PropAttrName_Set.  PropAttrName ::= "set" ;
-
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
 TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
 Decl_Pass. Decl2 ::= "pass" ;
 
-MethodDeclaration. Decl3 ::= Tok_Mth LowerIdent MaybeTemplateSgn FnSignature ;
+MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
 FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
 

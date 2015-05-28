@@ -12,12 +12,14 @@ import Absadora
 -- Environment
 -- -- --
 
+type CodePosition = Maybe (Int, Int)
+
 type VarName = String
 data VarType = VarType {
     varMutable :: Bool,
     -- varInitialized :: Bool, --TODO
     varClass :: Cid,
-    varDefPos :: Maybe (Int, Int)
+    varDefPos :: CodePosition
 } deriving Show
 
 type Cid = Int -- class id
@@ -68,7 +70,8 @@ data FunSgn = FunSgn {
 data ArgSgn = ArgSgn {
     argName :: Maybe VarName,
     argType :: Cid,
-    argHasDefault :: Bool
+    argHasDefault :: Bool,
+    argDefPos :: CodePosition
 } deriving (Eq, Ord, Show)
 
 data StructDesc = StructDesc {
