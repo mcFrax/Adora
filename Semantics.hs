@@ -404,11 +404,10 @@ hoisted stmts innerSem = do
                     [],
                     M.fromList [(ownCid, M.empty)])
                     -- TODO - Object implementation? Any always present props?
-            (revAttrs, impls) <- foldl foldDecl (return initRes) decls
+            (revAttrs, impls) <- foldl (>>=) (return initRes) $ map hoistDecl decls
             return (reverse revAttrs, impls)
             where
-                foldDecl acc decl@(FieldDefinition {}) = do
-                    (attrs, impls) <- acc
+                hoistDecl decl@(FieldDefinition {}) (attrs, impls) = do
                     let (FieldDefinition
                             typeExpr
                             (LowerIdent (pos, name))
@@ -419,8 +418,7 @@ hoisted stmts innerSem = do
                         _ -> throwAt pos (
                                 "typeExpr without cid?")
                     return ((name, cid'):attrs, impls)
-                foldDecl acc (MethodDefinition mthDecl bodyBlock) = do
-                    (attrs, impls) <- acc
+                hoistDecl (MethodDefinition mthDecl bodyBlock) (attrs, impls) = do
                     let (MethodDeclaration
                             (LowerIdent (pos, name))
                             mTmplSgn
@@ -445,21 +443,21 @@ hoisted stmts innerSem = do
                             mkCall fnSgn defArgs exeBody topLevelFid args'
                     impls' <- addProp name pos propImpl [ownCid] impls
                     return (attrs, impls')
-                foldDecl _ (PropertyDeclaration {}) = do
+                hoistDecl (PropertyDeclaration {}) _ = do
                     notYet "PropertyDeclaration"
-                foldDecl _ (ImplementationDefinition {}) = do
+                hoistDecl (ImplementationDefinition {}) _ = do
                     notYet "ImplementationDefinition"
-                foldDecl _ (TypeAliasDefinition {}) = do
+                hoistDecl (TypeAliasDefinition {}) _ = do
                     notYet "Nested types"
-                foldDecl _ (TypeDefinition_Class {}) = do
+                hoistDecl (TypeDefinition_Class {}) _ = do
                     notYet "Nested types"
-                foldDecl _ (TypeDefinition_Struct {}) = do
+                hoistDecl (TypeDefinition_Struct {}) _ = do
                     notYet "Nested types"
-                foldDecl _ (MethodDeclaration (LowerIdent (pos, _)) _ _) = do
+                hoistDecl (MethodDeclaration (LowerIdent (pos, _)) _ _) _ = do
                     throwAt pos $ (
                         "Method declaration without definition in " ++
                         "struct definition")
-                foldDecl acc Decl_Pass = acc
+                hoistDecl Decl_Pass acc = return acc
 
         hoistVar :: Bool -> LowerIdent -> Semantic () -> Semantic (Semantic ())
         hoistVar mutable (LowerIdent (pos, varName)) compilePrev = do
