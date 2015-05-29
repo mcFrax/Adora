@@ -127,12 +127,6 @@ stdClss = M.fromList $ map (\(n, cv) -> (n, Cid cv)) [
         ("Void", -100)
     ]
 
-mkMth :: (MemPt -> FunImpl) -> PropImpl
-mkMth mth = PropImpl {
-    propGetter=(\pt -> mkExe ($ ValFunction $ mth pt)),
-    propSetter=(error "Methods are read-only properties")
-}
-
 topLevelFid :: Fid
 topLevelFid = Fid 0
 
@@ -438,13 +432,63 @@ hoisted stmts innerSem = do
                             envInsideLoop=False
                         }
                     exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
-                    let propImpl = mkMth $ \pt -> FunImpl $ \args -> do
+                    let propImpl = mkMth fpos $ \pt -> FunImpl $ \args -> do
                             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
                             mkCall fnSgn defArgs exeBody topLevelFid args'
                     impls' <- addProp name pos propImpl [ownCid] impls
                     return (attrs, impls')
-                hoistDecl (PropertyDeclaration {}) _ = do
-                    notYet "PropertyDeclaration"
+                hoistDecl propDecl@(PropertyDeclaration {}) (attrs, impls) = do
+                    let (PropertyDeclaration
+                            (LowerIdent (pos, name))
+                            typeExpr
+                            getDef
+                            maybeSet) = propDecl
+                    typeSem <- typeExprSem typeExpr
+                    fpos <- completePos pos
+                    getter <- case getDef of
+                        PropDefClause_None -> do
+                            throwAt pos ("Getter declaration without " ++
+                                         "definition in struct definition")
+                        (PropDefClause_Def bodyBlock) -> do
+                            retCid <- case expCls typeSem of
+                                Just (Left retCid) -> return $ Just retCid
+                                _ -> error "typeExpr with semantics but without cid"
+                            let getterSgn = FunSgn {
+                                mthRetType=retCid,
+                                mthArgs=[]
+                            }
+--                          outerVars <- asks envVars
+                            let makeInEnv outEnv = outEnv{
+                                    envVars=M.fromList [("self", VarType {
+                                        varMutable=False,
+                                        varClass=ownCid,
+                                        varDefPos=fpos
+                                    })], -- M.union outerVars argVars,
+                                    envExpectedReturnType=Just retCid,
+                                    envInsideLoop=False
+                                }
+                            exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
+                            return $ \pt ->
+                                mkCall getterSgn M.empty exeBody topLevelFid [
+                                    (Just "self", mkExe $ \kv-> kv $ ValRef pt)]
+                        PropDefClause_Auto -> do
+                            notYetAt pos "custom getter"
+                    setter <- case maybeSet of
+                        MaybeSetClause_None -> return $ error "Read-only property"
+                        MaybeSetClause_Some PropDefClause_None -> do
+                            throwAt pos ("Setter declaration without " ++
+                                         "definition in struct definition")
+                        MaybeSetClause_Some (PropDefClause_Def _bodyBlock) -> do
+                            notYetAt pos "custom setter"
+                        MaybeSetClause_Some PropDefClause_Auto -> do
+                            notYetAt pos "custom setter"
+                    let propImpl = PropImpl {
+                        propGetter=getter,
+                        propSetter=setter,
+                        propDefPos=fpos
+                    }
+                    impls' <- addProp name pos propImpl [ownCid] impls
+                    return (attrs, impls')
                 hoistDecl (ImplementationDefinition {}) _ = do
                     notYet "ImplementationDefinition"
                 hoistDecl (TypeAliasDefinition {}) _ = do
@@ -458,6 +502,13 @@ hoisted stmts innerSem = do
                         "Method declaration without definition in " ++
                         "struct definition")
                 hoistDecl Decl_Pass acc = return acc
+
+                mkMth :: CodePosition -> (MemPt -> FunImpl) -> PropImpl
+                mkMth fpos mth = PropImpl {
+                    propGetter=(\pt -> mkExe ($ ValFunction $ mth pt)),
+                    propSetter=(error "Methods are read-only properties"),
+                    propDefPos=fpos
+                }
 
         hoistVar :: Bool -> LowerIdent -> Semantic () -> Semantic (Semantic ())
         hoistVar mutable (LowerIdent (pos, varName)) compilePrev = do

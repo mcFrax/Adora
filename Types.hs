@@ -86,7 +86,8 @@ type Impl = M.Map VarName PropImpl  -- both props and mths
 
 data PropImpl = PropImpl {
     propGetter :: MemPt -> Exe VarVal,
-    propSetter :: MemPt -> VarVal -> Exe ()  -- possibly undefined/error
+    propSetter :: MemPt -> VarVal -> Exe (),  -- possibly undefined/error
+    propDefPos :: CodePosition
 }
 
 instance Show PropImpl where

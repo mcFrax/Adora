@@ -1,0 +1,7 @@
+# return schowany w zagnieżdżonej funkcji
+
+fn ():
+    fn () -> Int:
+        return # błąd
+
+# EXPECTED COMPILATION ERROR #

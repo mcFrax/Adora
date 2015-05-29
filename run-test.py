@@ -62,7 +62,9 @@ def runTest(filename):
                 if expectations[exRunErr] != False:
                     raise Failure('Unexpected compilation error:\n' + errout)
             else:
-                raise Failure('Unknown failure: return code ' + test.returncode)
+                raise Failure('Unknown failure: return code ' +
+                                str(test.returncode) + '\n' +
+                                out + '\n' + errout)
             if out.rstrip('\n') != expectedOut.rstrip('\n'):
                 raise Failure('Incorrect output\n' +
                               'Expected output:\n' +
@@ -83,7 +85,9 @@ def runTest(filename):
                 elif test.returncode == 3:
                     raise Failure('Unexpected compilation error:\n' + errout)
                 else:
-                    raise Failure('Unknown failure: return code ' + test.returncode)
+                    raise Failure('Unknown failure: return code ' +
+                                  str(test.returncode) + '\n' +
+                                  out + '\n' + errout)
             if out.rstrip('\n') != expectedOut.rstrip('\n'):
                 raise Failure('Incorrect output\n' +
                               'Expected output:\n' +

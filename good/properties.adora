@@ -1,0 +1,32 @@
+struct Foo():
+    Int bar_
+    pro foo:
+        Int
+        get:
+            return 42
+    pro bar:
+        Int
+        get:
+            return self.[bar_]+5
+    mth sum () -> Int:
+        return self.foo + self.bar
+
+var foo = Foo(bar_=1)
+
+print foo.foo
+print foo.bar
+print foo.sum()
+
+foo.[bar_] = 4
+
+print foo.foo
+print foo.bar
+print foo.sum()
+
+# EXPECTED OUTPUT #
+# 42
+# 6
+# 48
+# 42
+# 9
+# 51

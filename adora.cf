@@ -22,7 +22,6 @@ position token Tok_Elif 'e''l''i''f' ;
 position token Tok_Else 'e''l''s''e' ;
 position token Tok_Fn 'f''n' ;
 position token Tok_Print 'p''r''i''n''t' ;
-position token Tok_Pro 'p''r''o' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
@@ -55,17 +54,15 @@ _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
 MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
 ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
 FieldDefinition.            Decl0 ::= Expr9 LowerIdent MaybeDefaultVal ;
-PropertyDeclaration.        Decl0 ::= Tok_Pro LowerIdent ":" "{" Expr9 ";" "get" PropDefClause MaybeSetClause "}" ;
+PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" Expr9 ";" "get" PropDefClause MaybeSetClause "}" ;
 
 MaybeSetClause_None. MaybeSetClause ::= ;
 MaybeSetClause_Some. MaybeSetClause ::= ";" "set" PropDefClause ;
 
+PropDefClause_None.     PropDefClause ::= ;
 PropDefClause_Def.      PropDefClause ::= StatementBlock ;
 PropDefClause_Auto.     PropDefClause ::= "auto" ;
-PropDefClause_Undef.    PropDefClause ::= "undefined" ;
-
-MaybePropAttrDef_None.   MaybePropAttrDef ::= ;
-MaybePropAttrDef_Some.   MaybePropAttrDef ::= StatementBlock ;
+-- PropDefClause_Undef.    PropDefClause ::= "undefined" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
 TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
