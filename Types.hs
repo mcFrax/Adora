@@ -6,8 +6,6 @@ import qualified Data.Map.Strict as M
 import System.Exit(exitWith, ExitCode(..))
 import System.IO
 
-import Absadora
-
 -- -- --
 -- Environment
 -- -- --
@@ -55,12 +53,19 @@ data RunEnv = RunEnv {
 }
 
 data ClassDesc = ClassDesc {
-    className :: String,
-    classProps :: M.Map VarName VarType,
-    classMths :: M.Map VarName FunSgn
-} | ClassDescIncomplete {
-    classDecl :: (Decl, LocEnv)
-} deriving Show
+    className_ :: String,
+    classProps_ :: M.Map VarName VarType
+} | ClassFun FunSgn
+    deriving Show
+
+className :: ClassDesc -> VarName
+className (ClassDesc{className_=name}) = name
+className (ClassFun sgn) = "<" ++ (show sgn) ++ ">"
+
+classProps :: ClassDesc -> M.Map VarName VarType
+classProps (ClassDesc{classProps_=props}) = props
+classProps (ClassFun _) = M.empty
+
 
 data FunSgn = FunSgn {
     mthRetType :: Maybe Cid,
@@ -79,7 +84,8 @@ data StructDesc = StructDesc {
     structCid :: Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl,
-    structCtor :: FunImpl
+    structCtor :: FunImpl,
+    structCtorSgn :: FunSgn
 } deriving Show
 
 type Impl = M.Map VarName PropImpl  -- both props and mths

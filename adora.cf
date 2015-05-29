@@ -24,6 +24,7 @@ position token Tok_Fn 'f''n' ;
 position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
+position token Tok_LP '(' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' letter (letter | digit | '_')*) ;
@@ -70,7 +71,7 @@ Decl_Pass. Decl2 ::= "pass" ;
 
 MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
 
-FnSignature_.  FnSignature ::= "(" [FunDef_Arg] ")" OptResultType ;
+FnSignature_.  FnSignature ::= Tok_LP [FunDef_Arg] ")" OptResultType ;
 
 separator FunDef_Arg "," ;
 FunDef_Arg_. FunDef_Arg ::= Expr9 LowerIdent MaybeDefaultVal ;
@@ -82,8 +83,8 @@ MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
 
 
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn "(" [SuperType] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn "(" [SuperType] ")" ":" "{" [Decl10] "}" ;
+TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
+TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -119,7 +120,7 @@ separator Stmt ";" ;
 Stmt_Decl.          Stmt ::= Decl11 ;
 Stmt_Expr.          Stmt ::= Expr ;
 Stmt_Let.           Stmt ::= "let" LowerIdent "=" Expr ;  -- constant
-Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
+Stmt_LetTuple.      Stmt ::= "let" Tok_LP [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
 Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
 Stmt_Return.        Stmt ::= Tok_Return ;
@@ -212,7 +213,7 @@ Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
 Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_TupSubscr. Expr10 ::= Expr10 "." Integer ;  -- tuple subscript
-Expr_FunCall.   Expr10 ::= Expr10 "(" [FunCallArg] ")" ;
+Expr_FunCall.   Expr10 ::= Expr10 Tok_LP [FunCallArg] ")" ;
 Expr_TmplAppl.  Expr10 ::= Expr10 "<!" [Expr] "!>" ;
 Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
 
@@ -234,5 +235,5 @@ Expr_TypeVar.   Expr11 ::= DollarIdent ;
 LstVal_None.   LstVal ::= "[" "]" ;
 LstVal_Some.   LstVal ::= "[" [Expr] "]" ;
 
-Expr_Parens.   Expr12 ::= "(" [Expr] ")" ;
+Expr_Parens.   Expr12 ::= Tok_LP [Expr] ")" ;
 -- wspolny nieterminal dla wyrazenia w nawiasie i krotki
