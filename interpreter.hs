@@ -6,7 +6,7 @@ import System.Console.Haskeline
 import System.FilePath
 #endif
 import System.Environment
-import System.Exit(exitFailure)
+import System.Exit(exitWith, ExitCode(..))
 import System.IO
 
 import ErrM
@@ -14,6 +14,9 @@ import Paradora
 import Layoutadora
 
 import Semantics
+
+compilationFailure :: IO a
+compilationFailure = exitWith $ ExitFailure 3
 
 main :: IO ()
 main = do
@@ -28,16 +31,16 @@ main = do
         _ -> do
             progName <- getProgName
             hPutStrLn stderr $ "Usage:\n    " ++ progName ++ " [FILE PATH]\n"
-            exitFailure
+            compilationFailure
     case pModule $ resolveLayout True . myLexer $ code of
         Bad errmsg -> do
             hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
-            exitFailure
+            compilationFailure
         Ok moduleSyntax -> do
             case moduleSem moduleSyntax programPath of
                 Left errmsg -> do
                     hPutStrLn stderr $ showSemError errmsg
-                    exitFailure
+                    compilationFailure
                 Right runModule -> runModule
     where
 #ifdef USE_HASKELINE

@@ -2,3 +2,5 @@
 
 var a = 1
 var a = 1
+
+# EXPECTED COMPILATION ERROR #

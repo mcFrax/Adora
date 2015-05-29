@@ -8,3 +8,5 @@ fn () -> Int:
 
 return  # błąd
 return 42  # też błąd
+
+# EXPECTED COMPILATION ERROR #

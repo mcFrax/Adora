@@ -5,3 +5,5 @@ fn ():
 
 fn () -> Int:
     return  # błąd
+
+# EXPECTED COMPILATION ERROR #

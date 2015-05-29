@@ -49,7 +49,7 @@ $(BnfcFiles): $(Langname).cf
 
 define ZipFiles
 README.pdf adora.cf stdlib.adora\
-run-test.sh run-test-bad.sh\
+run-test.py\
 Makefile $(Examples) $(SourceHs)
 endef
 
@@ -81,10 +81,10 @@ test: $(TestCases)
 	@echo "All tests passed"
 
 $(GoodTestCases): test-case-%: % interpreter
-	@./run-test.sh "$<"
+	@./run-test.py "$<"
 
 $(BadTestCases): test-case-%: % interpreter
-	@./run-test-bad.sh "$<"
+	@./run-test.py "$<"
 
 clean:
 	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y

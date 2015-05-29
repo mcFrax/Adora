@@ -3,7 +3,7 @@ module Types where
 import Control.DeepSeq
 import Control.Exception
 import qualified Data.Map.Strict as M
-import System.Exit(exitFailure)
+import System.Exit(exitWith, ExitCode(..))
 import System.IO
 
 import Absadora
@@ -192,7 +192,7 @@ mkExe exe = do
         handler :: SomeException -> IO a
         handler exception = do
             hPutStrLn stderr $ "Runtime exception: " ++ (show exception)
-            exitFailure
+            runtimeFailure
 
 runExe :: Exe a -> Cont
 runExe exe = exec exe (\_ _ _ -> return ())
@@ -222,3 +222,6 @@ data ExprSem = RValue {
 
 execRValue :: ExprSem -> SemiCont VarVal
 execRValue = exec.expRValue
+
+runtimeFailure :: IO a
+runtimeFailure = exitWith $ ExitFailure 2

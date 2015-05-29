@@ -6,5 +6,5 @@ print 1  # a to już nie
 
 # EXPECTED OUTPUT #
 # 0
-# EXPECTED ERROR #
+# EXPECTED RUNTIME ERROR #
 # Runtime exception: divide by zero

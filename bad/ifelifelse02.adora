@@ -2,3 +2,5 @@
 
 elif true:
     print 42
+
+# EXPECTED COMPILATION ERROR #

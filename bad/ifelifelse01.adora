@@ -2,3 +2,5 @@
 
 else:
     print 42
+
+# EXPECTED COMPILATION ERROR #

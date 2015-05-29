@@ -6,3 +6,5 @@ else:  # ok
     pass
 elif true:  # błąd
     pass
+
+# EXPECTED COMPILATION ERROR #

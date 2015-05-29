@@ -1,3 +1,5 @@
 # przypisanie do niezdefiniowanej zmiennej
 
 a = 1
+
+# EXPECTED COMPILATION ERROR #

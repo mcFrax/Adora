@@ -11,7 +11,6 @@ import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
 
-import System.Exit(exitFailure)
 import System.IO
 
 import Absadora
@@ -593,7 +592,7 @@ stmtSem (Stmt_Assert (Tok_Assert (pos, _)) expr) = do
             \_ _ -> do
                 hPutStrLn stderr ("Assertion at " ++ (showPos fpos) ++
                                   " failed: " ++ (printTree expr))
-                exitFailure
+                runtimeFailure
 
 stmtSem (Stmt_Print {}) = do
     return $ mkExe $ \k re mem -> do

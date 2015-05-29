@@ -5,3 +5,5 @@ struct Foo():
 
 struct Foo():
     pass
+
+# EXPECTED COMPILATION ERROR #

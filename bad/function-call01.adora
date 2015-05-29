@@ -4,3 +4,5 @@ let f = fn (Int a, Int b):
     pass
 
 f(a=1, a=1)
+
+# EXPECTED COMPILATION ERROR #
