@@ -1,12 +1,16 @@
-
-struct Nil():
-    pass
+class List():
+    Bool isNil:
+        get
 
 struct Cons():
     Int head
     Cons tail
 
-struct Tree():  # declaration of Tree class
+class Tree():
+    Bool isNil:
+        get
+
+struct Nil():
     pass
 
 struct Node():

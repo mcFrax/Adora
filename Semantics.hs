@@ -529,8 +529,8 @@ hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
     addPropToImpls name pos propImpl [ownCid] impls
 hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) impls = do
     let (PropertyDeclaration
-            (LowerIdent (pos, name))
             typeExpr
+            (LowerIdent (pos, name))
             getDef
             maybeSet) = propDecl
     cid <- typeExprCid typeExpr
@@ -628,16 +628,16 @@ hoistStrClsDecl ownCid (MethodDefinition mthDecl _bodyBlock) props = do
             FunDef_Arg_ typeName name MaybeDefaultVal_None
 hoistStrClsDecl ownCid propDecl@(PropertyDeclaration {}) props = do
     let (PropertyDeclaration
-            (LowerIdent (pos, name))
             typeExpr
+            (LowerIdent (pos, name))
             _getDef
             maybeSet) = propDecl
     let maybeSet' = case maybeSet of
             MaybeSetClause_None -> MaybeSetClause_None
             _ -> MaybeSetClause_Some PropDefClause_None
     hoistClsDecl ownCid (PropertyDeclaration
-            (LowerIdent (pos, name))
             typeExpr
+            (LowerIdent (pos, name))
             PropDefClause_None
             maybeSet') props
 hoistStrClsDecl _ (ImplementationDefinition {}) props = return props
@@ -659,8 +659,8 @@ hoistClsDecl _ (MethodDefinition mthDecl _) _ = do
     throwAt pos "Method definition inside class (only declarations allowed)"
 hoistClsDecl _ propDecl@(PropertyDeclaration {}) props = do
     let (PropertyDeclaration
-            (LowerIdent (pos, name))
             typeExpr
+            (LowerIdent (pos, name))
             getDef
             maybeSet) = propDecl
     when (getDef /= PropDefClause_None) $ do

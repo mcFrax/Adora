@@ -58,7 +58,7 @@ _.                          Decl0 ::= Decl3 ; -- MethodDeclaration
 MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
 ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
 FieldDefinition.            Decl0 ::= Expr9 LowerIdent MaybeDefaultVal ;
-PropertyDeclaration.        Decl0 ::= "pro" LowerIdent ":" "{" Expr9 ";" "get" PropDefClause MaybeSetClause "}" ;
+PropertyDeclaration.        Decl0 ::= Expr9 LowerIdent ":" "{" "get" PropDefClause MaybeSetClause "}" ;
 
 MaybeSetClause_None. MaybeSetClause ::= ;
 MaybeSetClause_Some. MaybeSetClause ::= ";" "set" PropDefClause ;
