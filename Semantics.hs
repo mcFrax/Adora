@@ -4,7 +4,6 @@ module Semantics where
 
 import Control.DeepSeq
 import Control.Monad
-import Control.Monad.Error.Class
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
 import qualified Data.Map.Strict as M
@@ -81,23 +80,18 @@ getFunctionCid fnSgn = do
             return cid
 
 
--- To samo mozna by dostac uzywajac ErrorT, StateT i Reader,
--- ale ilosc liftow bylaby przytlaczajaca - zaimplementowanie
--- tego w jednym kawalku eliminuje je wszystkie.
 newtype Semantic a = Semantic {
-    runSemantic :: SemState -> LocEnv -> Either SErr (SemState, LocEnv, a)
+    runSemantic :: SemState -> LocEnv -> Either Err (SemState, LocEnv, a)
 }
+
+data Err = Err CodePosition String
+         | ErrSomewhere String
 
 instance Monad Semantic where
     esr1 >>= esr2 = Semantic $ \st env -> do
         (st', env', x) <- runSemantic esr1 st env
         runSemantic (esr2 x) st' env'
     return x = Semantic $ \st env -> return (st, env, x)
-
-instance MonadError SErr Semantic where
-    throwError e = Semantic $ \_ _ -> throwError e
-    (Semantic try) `catchError` h = Semantic $ \st e -> do
-        (try st e) `catchError` (\err -> runSemantic (h err) st e)
 
 instance MonadState SemState Semantic where
     get = Semantic $ \st env -> return (st, env, st)
@@ -109,23 +103,23 @@ instance MonadReader LocEnv Semantic where
         (st', _, res) <- run st (f env)
         return (st', env, res)
 
+-- environment modifications (tampering with Reader part):
+
 setEnv :: LocEnv -> Semantic ()
 setEnv env = Semantic $ \st _ -> return (st, env, ())
 
 modifyEnv :: (LocEnv -> LocEnv) -> Semantic ()
 modifyEnv f = setEnv =<< (liftM f ask)
 
+-- errors:
 
-data SErr = SErr String
-          | SErrP CodePosition String
+throwError :: Err -> Semantic a
+throwError e = Semantic $ \_ _ -> Left e
 
-instance Error SErr where
-  strMsg = SErr
-
-showSemError :: SErr -> String
-showSemError (SErr s) = "?:?:?: error: " ++ s
-showSemError (SErrP pos s) = do
+showSemError :: Err -> String
+showSemError (Err pos s) = do
     (showPos pos) ++ ": error: " ++ s
+showSemError (ErrSomewhere s) = "?:?:?: error: " ++ s
 
 showPos :: CodePosition -> String
 showPos (path, ln, col) = path ++ ":" ++ (show ln) ++ ":" ++ (show col)
@@ -134,6 +128,8 @@ completePos :: (Int, Int) -> Semantic CodePosition
 completePos (ln, col) = do
     fileName <- gets sstFileName
     return (fileName, ln, col)
+
+-- global env:
 
 stdClss :: M.Map String Cid
 stdClss = M.fromList $ map (\(n, cv) -> (n, Cid cv)) [
@@ -168,7 +164,7 @@ topLevelFid = Fid 0
 --                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
-moduleSem :: Module -> String -> Either SErr (IO ())
+moduleSem :: Module -> String -> Either Err (IO ())
 moduleSem (Module_ stmts) fileName = do
     let Module_ stdlibStmts = stdlib
     (sst0, env0, exe0) <- do
@@ -922,7 +918,7 @@ typeExprSem (Expr_TypeVar (DollarIdent (pos, _))) = do
     notYetAt pos "Expr_TypeVar"
 typeExprSem (Expr_Parens _ [expr]) = typeExprSem expr
 typeExprSem expr = do
-    throwError $ SErr $ "`" ++ (printTree expr) ++ "' is not a proper type name"
+    throwError $ ErrSomewhere $ "`" ++ (printTree expr) ++ "' is not a proper type name"
 
 typeExprCid :: Expr -> Semantic Cid
 typeExprCid expr = do
@@ -1182,7 +1178,7 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
     kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argTuples
     let kwargsSet = foldl (\s (n, _) -> S.insert n s) S.empty kwargs
     when ((S.size kwargsSet) /= (length kwargs)) $ do
-        throwError $ SErr "Kwarg names not unique"
+        throwAt pos "Kwarg names not unique"
     classes <- gets $ globClasses.sstGlob
     cid <- case classes !!! (expCid exeFn) of
         ClassFun fnSgn -> do
@@ -1206,7 +1202,7 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
         fstIsNothing = (== Nothing).fst
         unJustKwarg (Just name, exe) = return (name, exe)
         unJustKwarg (Nothing, _) = do
-            throwError $ SErr "Positional arg after kwargs"
+            throwAt pos "Positional arg after kwargs"
 
 exprSem (Expr_Parens _ [expr]) = exprSem expr
 
@@ -1368,7 +1364,7 @@ assertTmplSgnEmpty mTmplSgn =
 throwAt :: (Int, Int) -> String -> Semantic a
 throwAt (ln, col) msg = do
     fileName <- gets sstFileName
-    throwError $ SErrP (fileName, ln, col) msg
+    throwError $ Err (fileName, ln, col) msg
 
 typeMismatch :: Cid -> Cid -> (Int, Int) -> Semantic a
 typeMismatch expectedCid foundCid pos = do
@@ -1378,7 +1374,7 @@ typeMismatch expectedCid foundCid pos = do
                  fndName ++ "' found")
 
 notYet :: Show a => a -> Semantic b
-notYet = throwError.(SErr).("not yet: " ++).show
+notYet = throwError.(ErrSomewhere).("not yet: " ++).show
 
 notYetAt :: Show a => (Int, Int) -> a -> Semantic b
 notYetAt pos what = throwAt pos $ "not yet: " ++ (show what)
