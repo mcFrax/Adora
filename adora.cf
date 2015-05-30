@@ -26,6 +26,8 @@ position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
 position token Tok_LP '(' ;
 position token Tok_LTP '<''!' ;
+position token Tok_Assign '=' ;
+position token ModifyOper ( '+' | '-' | '*' | '/' | '/''/' ) '=' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' letter (letter | digit | '_')*) ;
@@ -67,7 +69,7 @@ PropDefClause_Auto.     PropDefClause ::= "auto" ;
 -- PropDefClause_Undef.    PropDefClause ::= "undefined" ;
 
 _.  Decl2 ::= Decl7 ; -- TypeDefinition
-TypeAliasDefinition.  Decl2 ::= "type" UpperIdent "=" Expr9 ;
+TypeAliasDefinition.  Decl2 ::= "type" UpperIdent Tok_Assign Expr9 ;
 Decl_Pass. Decl2 ::= "pass" ;
 
 MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
@@ -81,7 +83,7 @@ OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" Expr9;
 
 MaybeDefaultVal_None. MaybeDefaultVal ::= ;
-MaybeDefaultVal_Some. MaybeDefaultVal ::= "=" Expr ;
+MaybeDefaultVal_Some. MaybeDefaultVal ::= Tok_Assign Expr ;
 
 
 TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
@@ -120,10 +122,11 @@ separator Stmt ";" ;
 
 Stmt_Decl.          Stmt ::= Decl11 ;
 Stmt_Expr.          Stmt ::= Expr ;
-Stmt_Let.           Stmt ::= "let" LowerIdent "=" Expr ;  -- constant
-Stmt_LetTuple.      Stmt ::= "let" Tok_LP [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
-Stmt_Var.           Stmt ::= "var" LowerIdent "=" Expr ;  -- variable
-Stmt_Assign.        Stmt ::= Expr AssignOper Expr;
+Stmt_Let.           Stmt ::= "let" LowerIdent Tok_Assign Expr ;  -- constant
+Stmt_LetTuple.      Stmt ::= "let" Tok_LP [LowerIdent] ")" Tok_Assign Expr ;  -- tuple unpacking
+Stmt_Var.           Stmt ::= "var" LowerIdent Tok_Assign Expr ;  -- variable
+Stmt_Assign.        Stmt ::= Expr Tok_Assign Expr;
+Stmt_Modify.        Stmt ::= Expr ModifyOper Expr;
 Stmt_Return.        Stmt ::= Tok_Return ;
 Stmt_ReturnValue.   Stmt ::= Tok_Return Expr ;
 Stmt_If.            Stmt ::= Tok_If Expr StatementBlock ;
@@ -132,21 +135,14 @@ Stmt_Else.          Stmt ::= Tok_Else StatementBlock ;
 Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
-Stmt_For.           Stmt ::= "for" LowerIdent "=" Expr "then" Expr StatementBlock ;
-Stmt_ForWhile.      Stmt ::= "for" LowerIdent "=" Expr "then" Expr "while" Expr StatementBlock ;
+Stmt_For.           Stmt ::= "for" LowerIdent Tok_Assign Expr "then" Expr StatementBlock ;
+Stmt_ForWhile.      Stmt ::= "for" LowerIdent Tok_Assign Expr "then" Expr "while" Expr StatementBlock ;
 Stmt_Break.         Stmt ::= Tok_Break ;
 Stmt_Continue.      Stmt ::= Tok_Continue ;
 Stmt_Assert.        Stmt ::= Tok_Assert Expr ;
 Stmt_Print.         Stmt ::= Tok_Print ;
 Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
 Stmt_Memdump.       Stmt ::= "dumpmem" ;
-
-AssignOper_Assign. AssignOper ::= "=" ;
-AssignOper_Inc.    AssignOper ::= "+=" ;
-AssignOper_Dec.    AssignOper ::= "-=" ;
-AssignOper_Mul.    AssignOper ::= "*=" ;
-AssignOper_Div.    AssignOper ::= "/=" ;
-AssignOper_IDiv.   AssignOper ::= "//=" ;
 
 separator CaseClause "" ;
 CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
@@ -220,7 +216,7 @@ Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
 
 separator FunCallArg "," ;
 FunCallArg_Positional. FunCallArg ::= Expr ;
-FunCallArg_Keyword.    FunCallArg ::= LowerIdent "=" Expr ;
+FunCallArg_Keyword.    FunCallArg ::= LowerIdent Tok_Assign Expr ;
 
 _.              Expr11 ::= Expr12 ;
 Expr_Null.      Expr11 ::= Tok_Null ;

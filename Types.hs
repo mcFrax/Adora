@@ -75,8 +75,7 @@ data FunSgn = FunSgn {
 data ArgSgn = ArgSgn {
     argName :: Maybe VarName,
     argType :: Cid,
-    argHasDefault :: Bool,
-    argDefPos :: CodePosition
+    argHasDefault :: Bool
 } deriving (Eq, Ord, Show)
 
 data StructDesc = StructDesc {

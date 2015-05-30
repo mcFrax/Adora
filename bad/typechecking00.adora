@@ -1,0 +1,6 @@
+# użycie niezdefiniowanej zmiennej
+
+a
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking00.adora:3:1: error: Undefined variable `a'

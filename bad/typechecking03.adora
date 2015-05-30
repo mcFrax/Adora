@@ -1,0 +1,7 @@
+# return ze złym typem
+
+fn () -> Int:
+    return true
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking03.adora:4:5: error: Value of type `Int' expected, `Bool' found

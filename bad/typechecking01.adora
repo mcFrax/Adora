@@ -1,0 +1,7 @@
+# przypisanie do zmiennej wartości o innym typie
+
+var v = 1
+v = true
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking01.adora:4:3: error: Value of type `Int' expected, `Bool' found

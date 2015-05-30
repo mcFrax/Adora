@@ -146,6 +146,15 @@ stdClss = M.fromList $ map (\(n, cv) -> (n, Cid cv)) [
         ("Void", -100)
     ]
 
+stdGlobClss :: CidMap
+stdGlobClss = do
+    M.fromList $ map f $ M.toList stdClss
+    where
+        f (name, cid) = (cid, ClassDesc {
+            className_=name,
+            classProps_=M.empty
+        })
+
 topLevelFid :: Fid
 topLevelFid = Fid 0
 
@@ -181,7 +190,7 @@ moduleSem (Module_ stmts) fileName = do
     where
         initSemState = SemState {
             sstGlob=GlobEnv {
-                globClasses=M.empty,
+                globClasses=stdGlobClss,
                 globStructs=M.empty
             },
             sstStructTmpls=(M.empty, M.empty),
@@ -311,15 +320,15 @@ hoistingDone :: Semantic (HoistingLevel -> Semantic HoistingLevel)
 hoistingDone = return $ return
 
 hoistStmt :: Stmt -> Semantic (HoistingLevel -> Semantic HoistingLevel)
-hoistStmt (Stmt_Let ident expr) = do
+hoistStmt (Stmt_Let ident _ expr) = do
     cid <- deduceType expr
     hoistVar cid False ident
 hoistStmt (Stmt_LetTuple {}) = do
     notYet $ "hoistStmt (Stmt_LetTuple ..)"
-hoistStmt (Stmt_Var ident expr) = do
+hoistStmt (Stmt_Var ident _ expr) = do
     cid <- deduceType expr
     hoistVar cid True ident
-hoistStmt (Stmt_Decl (TypeAliasDefinition _ident _typeExpr)) = do
+hoistStmt (Stmt_Decl (TypeAliasDefinition _ident _ _typeExpr)) = do
     --TODO
 --     let UpperIdent (pos, aliasName) = ident
 --     classes <- asks envClasses
@@ -386,7 +395,6 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
     _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
     sid <- newSid
     cid <- newCid
-    fStrPos <- completePos strPos
     modifyEnv $ \env -> env {
             envStructs=M.insert strName sid beforeStructs,
             envClasses=M.insert strName cid beforeClasses
@@ -434,8 +442,7 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                     attrToArg (attrName, attrCid) = ArgSgn {
                         argName=Just attrName,
                         argType=attrCid,
-                        argHasDefault=False,  -- TODO?
-                        argDefPos=fStrPos
+                        argHasDefault=False  -- TODO?
                     }
                     exeCtorBody = mkExe $ \_ re mem -> let
                         vars = frameContent $ memFrame mem
@@ -443,9 +450,9 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                                 objSid=sid,
                                 objAttrs=M.intersection vars attrsMap
                             } mem
-                        mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
+                        -- mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
                         -- TODO: execute custom contructor body/init method?
-                        in (reReturn re) (ValRef pt) re mem''
+                        in (reReturn re) (ValRef pt) re mem'
                 modify $ \sst -> let
                     glob = sstGlob sst
                     glob' = glob{
@@ -503,13 +510,13 @@ hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
             signature) = mthDecl
     fpos <- completePos pos
     assertTmplSgnEmpty mTmplSgn
-    (fnSgn, defArgs) <- fnSignatureSem signature
+    (fnSgn, defArgs, argDefPoss) <- fnSignatureSem signature CompileDefaults
 --                     outerVars <- asks envVars
     let argVars = M.insert "self" (VarType {
             varMutable=False,
             varClass=ownCid,
             varDefPos=fpos
-        }) $ argsToVars $ mthArgs fnSgn
+        }) $ argsToVars (mthArgs fnSgn) argDefPoss
     let makeInEnv outEnv = outEnv{
             envVars=argVars, -- M.union outerVars argVars,
             envExpectedReturnType=Just $ mthRetType fnSgn,
@@ -684,9 +691,7 @@ hoistClsDecl _ decl@(MethodDeclaration {}) props = do
             signature) = decl
     fpos <- completePos pos
     assertTmplSgnEmpty mTmplSgn
-    (fnSgn, defArgs) <- fnSignatureSem signature
-    when (not $ M.null defArgs) $ do
-        throwAt pos "default argument values specified in method declaration"
+    (fnSgn, _, _) <- fnSignatureSem signature RejectDefaults
     propCid <- getFunctionCid fnSgn
     let propType = VarType {
             varMutable=False,
@@ -735,7 +740,7 @@ stmtSem (Stmt_Expr expr) = do
     return $ mkExe $ \k -> do
         execRValue esem $ \_ -> k ()
 
-stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
+stmtSem (Stmt_Let (LowerIdent (_, varName)) _ expr) = do
     eexe <- exprSem expr
 --     check for shadowing ...
 --     modifyEnv ...
@@ -743,23 +748,27 @@ stmtSem (Stmt_Let (LowerIdent (_, varName)) expr) = do
         execRValue eexe $ \val re mem -> do
             k () re $ allocVar varName val mem
 
-stmtSem (Stmt_Var (LowerIdent (_, varName)) expr) = do
+stmtSem (Stmt_Var (LowerIdent (_, varName)) _ expr) = do
     eexe <- exprSem expr
---     check for shadowing ...
---     modifyEnv ...
+--     modifyEnv - var initialized?
     return $ mkExe $ \k -> do
         execRValue eexe $ \val re mem -> do
             k () re $ allocVar varName val mem
 
-stmtSem (Stmt_Assign lexpr AssignOper_Assign rexpr) = do
+stmtSem (Stmt_Assign lexpr (Tok_Assign (pos, _)) rexpr) = do
     lexe <- exprSem lexpr
     rexe <- exprSem rexpr
---     typecheck  ...
     case lexe of
-         LValue {} -> do
-            return $ mkExe $ \k -> do
-                execRValue rexe $ \val -> exec (setLValue lexe val) k
-         _ -> throwError $ SErr $ "Left side of assignment is not assignable"
+        LValue {} -> do
+            if ((expCid lexe) == (expCid rexe)) then
+                return $ mkExe $ \k -> do
+                    execRValue rexe $ \val -> exec (setLValue lexe val) k
+            else do
+                lcls <- getCls $ expCid lexe
+                rcls <- getCls $ expCid rexe
+                throwAt pos ("Value of type `" ++ (className lcls) ++ "' expected, `" ++
+                             (className rcls) ++ "' found")
+        _ -> throwAt pos "Left side of assignment is not assignable"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
 stmtSem (Stmt_Elif (Tok_Elif (pos, _)) _ _) = do
@@ -822,9 +831,13 @@ stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
         Just Nothing ->
             throwAt pos ("Return statement with value " ++
                                     "in funtion returning nothing")
-        Just _cid -> do
-            -- TODO: check cid
+        Just (Just expectedCid) -> do
             eexe <- exprSem expr
+            when ((expCid eexe) /= expectedCid) $ do
+                expCls <- getCls $ expectedCid
+                actCls <- getCls $ expCid eexe
+                throwAt pos ("Value of type `" ++ (className expCls) ++ "' expected, `" ++
+                             (className actCls) ++ "' found")
             return $ mkExe $ \_ -> execRValue eexe $ \val re -> reReturn re val re
         Nothing ->
             throwAt pos ("Unexpected return statement " ++
@@ -903,10 +916,8 @@ typeExprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
             return $ StrExpr sid cid
         Nothing -> do
             return $ ClsExpr cid
-typeExprSem (Expr_FnType sgnExpr@(FnSignature_ (Tok_LP (pos, _)) _ _)) = do
-    (fnSgn, defArgs) <- fnSignatureSem sgnExpr
-    when (not $ M.null defArgs) $
-        throwAt pos "default argument values specified in method type signature"
+typeExprSem (Expr_FnType sgnExpr@(FnSignature_ _ _ _)) = do
+    (fnSgn, _, _) <- fnSignatureSem sgnExpr RejectDefaults
     cid <- getFunctionCid fnSgn
     return $ ClsExpr cid
 typeExprSem (Expr_TmplAppl _ (Tok_LTP (pos, _)) _) = do
@@ -949,10 +960,8 @@ deduceType (Expr_IntDiv {}) = return (stdClss M.! "Int")
 deduceType (Expr_Mod {}) = return (stdClss M.! "Int")
 deduceType (Expr_Minus expr) = deduceType expr
 
-deduceType (Expr_Lambda (Tok_Fn (pos, _)) signature _) = do
-    (fnSgn, defArgs) <- fnSignatureSem signature
-    when (not $ M.null defArgs) $ do
-        throwAt pos "FUCK THAT IN PARTICULAR"
+deduceType (Expr_Lambda _ signature _) = do
+    (fnSgn, _, _) <- fnSignatureSem signature AcceptDefaults
     getFunctionCid fnSgn
 
 deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
@@ -977,7 +986,7 @@ deduceType (Expr_Field expr (LowerIdent (pos, attrName))) = do
 
 deduceType (Expr_Prop expr (LowerIdent (pos, propName))) = do
     objCid <- deduceType expr
-    cls <- gets $ (!!! objCid).globClasses.sstGlob
+    cls <- getCls objCid
     liftM varClass $ case M.lookup propName $ classProps cls of
         Just propType -> return propType
         Nothing -> throwAt pos (
@@ -1002,6 +1011,10 @@ deduceType (Expr_Parens _ [expr]) = deduceType expr
 -- deduceType (Expr_Parens exprs) = {- tuple -}
 
 deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
+
+
+getCls :: Cid -> Semantic ClassDesc
+getCls cid = gets $ (!!! cid).globClasses.sstGlob
 
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
@@ -1090,10 +1103,10 @@ exprSem (Expr_Minus expr) = do
             ke (ValInt $ 0 - val) re mem
 
 exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
-    (fnSgn, defArgs) <- fnSignatureSem signature
+    (fnSgn, defArgs, argDefPoss) <- fnSignatureSem signature CompileDefaults
     vars <- asks envVars
     let makeInEnv outEnv = outEnv{
-            envVars=M.union vars (argsToVars $ mthArgs fnSgn),
+            envVars=M.union vars (argsToVars (mthArgs fnSgn) argDefPoss),
             envExpectedReturnType=Just $ mthRetType fnSgn,
             envInsideLoop=False
         }
@@ -1145,7 +1158,7 @@ exprSem (Expr_Field expr (LowerIdent (pos, attrName))) = do
 exprSem (Expr_Prop expr (LowerIdent (pos, propName))) = do
     exee <- exprSem expr
     let objCid = expCid exee
-    cls <- gets $ (!!! objCid).globClasses.sstGlob
+    cls <- getCls objCid
     propType <- case M.lookup propName $ classProps cls of
         Just propType -> return propType
         Nothing -> throwAt pos (
@@ -1193,7 +1206,7 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
         argSem (FunCallArg_Positional argExpr) = do
             exeArg <- liftM expRValue $ exprSem argExpr
             return (Nothing, exeArg)
-        argSem (FunCallArg_Keyword (LowerIdent (_, name)) argExpr) = do
+        argSem (FunCallArg_Keyword (LowerIdent (_, name)) _ argExpr) = do
             exeArg <- liftM expRValue $ exprSem argExpr
             return (Just name, exeArg)
         fstIsNothing = (== Nothing).fst
@@ -1218,9 +1231,13 @@ exprSem expr = notYet $ printTree expr
 --                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
+data DefaultsHandling = RejectDefaults
+                      | AcceptDefaults
+                      | CompileDefaults
 
-fnSignatureSem :: FnSignature -> Semantic (FunSgn, M.Map VarName (Exe VarVal))
-fnSignatureSem (FnSignature_ _ args optResType) = do
+fnSignatureSem :: FnSignature -> DefaultsHandling
+    -> Semantic (FunSgn, M.Map VarName (Exe VarVal), M.Map VarName CodePosition)
+fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
     argTuples <- mapM argSem args
     retType <- case optResType of
         OptResultType_None -> return Nothing
@@ -1228,16 +1245,17 @@ fnSignatureSem (FnSignature_ _ args optResType) = do
             liftM Just $ typeExprCid typeExpr
     let funSgn = FunSgn {
         mthRetType=retType,
-        mthArgs=(map fst argTuples)
+        mthArgs=(map (\(a, _, _) -> a) argTuples)
     }
     let defArgsMap = foldl argToMap M.empty argTuples
-    return (funSgn, defArgsMap)
+    let argDefPosMap = foldl argToDefPosMap M.empty argTuples
+    return (funSgn, defArgsMap, argDefPosMap)
     where
-        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe VarVal))
+        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe VarVal), CodePosition)
         argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, "_")) defVal) = do
             fpos <- completePos pos
             case defVal of
-                MaybeDefaultVal_Some _ -> do
+                MaybeDefaultVal_Some _ _ -> do
                     throwAt pos ("Unnamed arguments cannot have " ++
                                             "default value specified (may " ++
                                             "change in future)")
@@ -1246,40 +1264,47 @@ fnSignatureSem (FnSignature_ _ args optResType) = do
             return $ (ArgSgn {
                 argName=Nothing,
                 argType=cid,
-                argHasDefault=False,
-                argDefPos=fpos
-            }, Nothing)
+                argHasDefault=False
+            }, Nothing, fpos)
         argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, name)) defVal) = do
             fpos <- completePos pos
             -- TODO: process type
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
-                MaybeDefaultVal_Some expr -> do
-                    defExe <- liftM expRValue $  exprSem expr
-                    return (True, Just $ defExe)
+                MaybeDefaultVal_Some _ expr -> do
+                    case defaultsHandling of
+                        AcceptDefaults -> do
+                            return (True, Nothing)
+                        CompileDefaults -> do
+                            defExe <- liftM expRValue $  exprSem expr
+                            return (True, Just $ defExe)
+                        RejectDefaults -> do
+                            throwAt pos ("Default argument value " ++
+                                        "specification is not allowed here")
             cid <- typeExprCid typeExpr
             return $ (ArgSgn {
                 argName=Just name,
                 argType=cid,
-                argHasDefault=hasDef,
-                argDefPos=fpos
-            }, defExe)
-        argToMap m (_, Nothing) = m
-        argToMap m (ArgSgn{argName=Just name}, Just exe) = M.insert name exe m
+                argHasDefault=hasDef
+            }, defExe, fpos)
+        argToMap m (_, Nothing, _) = m
+        argToMap m (ArgSgn{argName=Just name}, Just exe, _) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
+        argToDefPosMap m (ArgSgn{argName=Nothing}, _, _dp) = m
+        argToDefPosMap m (ArgSgn{argName=Just name}, _, dp) = M.insert name dp m
 
 
-argsToVars :: [ArgSgn] -> M.Map VarName VarType
-argsToVars args = M.fromList $ do
+argsToVars :: [ArgSgn] -> M.Map VarName CodePosition -> M.Map VarName VarType
+argsToVars args argDefPoss = M.fromList $ do
     arg <- args
     case arg of
-        ArgSgn (Just name) cid _ _ -> do
+        ArgSgn (Just name) cid _ -> do
             return $ (name, VarType {
                 varMutable=True,
                 varClass=cid,
-                varDefPos=argDefPos arg
+                varDefPos=argDefPoss !!! name
             })
-        ArgSgn Nothing _ _ _ -> []
+        ArgSgn Nothing _ _ -> []
 
 mkCall :: FunSgn -> M.Map VarName (Exe VarVal) -> Exe () -> Fid ->
     [(Maybe VarName, Exe VarVal)] -> Exe VarVal

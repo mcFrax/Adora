@@ -1,0 +1,6 @@
+# wywołanie czegoś, co nie jest funkcją
+
+1()
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking02.adora:3:2: error: Trying to call `1' of type `Int', which is not a function
