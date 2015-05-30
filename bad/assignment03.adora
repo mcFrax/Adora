@@ -1,0 +1,8 @@
+# przypisanie do self
+
+struct Foo ():
+    mth explode():
+        self = Foo()
+
+# EXPECTED COMPILATION ERROR #
+# bad/assignment03.adora:5:14: error: Left side of assignment is not assignable

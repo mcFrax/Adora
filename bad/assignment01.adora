@@ -3,3 +3,4 @@
 1 = 1
 
 # EXPECTED COMPILATION ERROR #
+# bad/assignment01.adora:3:3: error: Left side of assignment is not assignable

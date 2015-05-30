@@ -5,3 +5,4 @@ let a = 1
 a = 2
 
 # EXPECTED COMPILATION ERROR #
+# bad/assignment02.adora:5:3: error: Left side of assignment is not assignable

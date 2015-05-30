@@ -399,6 +399,13 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
             envStructs=M.insert strName sid beforeStructs,
             envClasses=M.insert strName cid beforeClasses
         }
+    let updateDesc newDesc = do
+        modify $ \sst -> let
+            glob = sstGlob sst
+            glob' = glob{
+                    globStructs=M.insert sid newDesc $ globStructs glob
+                }
+            in sst{sstGlob=glob'}
     queueNextLevel2 $ do  -- 2
         cls <- compileClass cid ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
         modify $ \sst -> let
@@ -420,16 +427,9 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                     structCtor=error "Undefined structCtor",
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
-            modify $ \sst -> let
-                glob = sstGlob sst
-                glob' = glob{
-                        globStructs=M.insert sid structStub $ globStructs glob
-                    }
-                in sst{sstGlob=glob'}
+            updateDesc structStub
             queueNextLevel2 $ do  -- 5
-                impls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
                 let struct = structStub {
-                        structClasses=impls,
                         structCtor=FunImpl $ constructor,
                         structCtorSgn=ctorSgn
                     }
@@ -453,13 +453,13 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                         -- mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
                         -- TODO: execute custom contructor body/init method?
                         in (reReturn re) (ValRef pt) re mem'
-                modify $ \sst -> let
-                    glob = sstGlob sst
-                    glob' = glob{
-                            globStructs=M.insert sid struct $ globStructs glob
-                        }
-                    in sst{sstGlob=glob'}
-                hoistingDone
+                updateDesc struct
+                queueNextLevel $ do -- 6
+                    impls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
+                    updateDesc struct {
+                        structClasses=impls
+                    }
+                    hoistingDone
 
 hoistStmt (Stmt_Decl Decl_Pass) = hoistingDone
 
