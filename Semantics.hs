@@ -279,54 +279,80 @@ stmtSeqSem stmts = do
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
+data HoistingLevel = HoistingLevel (Semantic HoistingLevel)
+                   | HoistingEnd
+
 hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)
 hoisted stmts innerSem = do
-    compileHoisted <- foldl (>>=) (return $ return ()) $ map hoistStmt stmts
-    compileHoisted
+    level1 <- (foldl (>>=) (return HoistingEnd)) =<< (mapM hoistStmt stmts)
+    hoist level1
     innerSem
+    where
+        hoist (HoistingLevel nextLevel) = do
+            nextLevel' <- nextLevel
+            hoist nextLevel'
+        hoist HoistingEnd = return ()
 
+queueNextLevel :: Semantic (HoistingLevel -> Semantic HoistingLevel)
+    -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+queueNextLevel nextLevel = do
+    nextLevel' <- nextLevel
+    return $ \hoistingAcc -> do
+        case hoistingAcc of
+            HoistingLevel hoistingAcc' -> return $ HoistingLevel $ do
+                hoistingAcc' >>= nextLevel'
+            HoistingEnd -> return $ HoistingLevel $ nextLevel' HoistingEnd
 
-hoistStmt :: Stmt -> Semantic () -> Semantic (Semantic ())
-hoistStmt (Stmt_Let ident expr) compilePrev = do
-    cid <- liftM expCid $ exprSem expr
-    hoistVar cid False ident compilePrev
-hoistStmt (Stmt_LetTuple {}) _compilePrev = do
+queueNextLevel2 :: Semantic (HoistingLevel -> Semantic HoistingLevel)
+    -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+queueNextLevel2 = queueNextLevel.queueNextLevel
+
+hoistingDone :: Semantic (HoistingLevel -> Semantic HoistingLevel)
+hoistingDone = return $ return
+
+hoistStmt :: Stmt -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+hoistStmt (Stmt_Let ident expr) = do
+    cid <- deduceType expr
+    hoistVar cid False ident
+hoistStmt (Stmt_LetTuple {}) = do
     notYet $ "hoistStmt (Stmt_LetTuple ..)"
-hoistStmt (Stmt_Var ident expr) compilePrev = do
-    cid <- liftM expCid $ exprSem expr
-    hoistVar cid True ident compilePrev
-hoistStmt (Stmt_Decl (TypeAliasDefinition ident typeExpr)) compilePrev = do
-    let UpperIdent (pos, aliasName) = ident
-    classes <- asks envClasses
-    structs <- asks envStructs
-    typeSem <- typeExprSem typeExpr
-    (clsFound, classes') <- case expCls typeSem of  -- TODO: a co jak ta druga jest zdefiniowana później?
-        Just (Left cid) -> do
-            when (aliasName `M.member` classes) $
-                throwAt pos $ (
-                    "Class `" ++ aliasName ++ "' already exists")
-            return (True, M.insert aliasName cid classes)
-        Just (Right _ctid) -> do
-            notYetAt pos "Just (Right ctid)"
-        Nothing -> return (False, classes)
-    (strFound, structs') <- case expStr typeSem of
-        Just (Left sid) -> do
-            when (aliasName `M.member` structs) $
-                throwAt pos $ (
-                    "Struct `" ++ aliasName ++ "' already exists")
-            return (True, M.insert aliasName sid structs)
-        Just (Right _stid) -> do
-            notYetAt pos "Just (Right stid)"
-        Nothing -> return (False, structs)
-    when (not $ clsFound || strFound) $ do
-        error "not $ clsFound || strFound"
-    modifyEnv $ \env -> env {
-            envClasses=classes',
-            envStructs=structs'
-        }
-    return compilePrev
+hoistStmt (Stmt_Var ident expr) = do
+    cid <- deduceType expr
+    hoistVar cid True ident
+hoistStmt (Stmt_Decl (TypeAliasDefinition _ident _typeExpr)) = do
+    --TODO
+--     let UpperIdent (pos, aliasName) = ident
+--     classes <- asks envClasses
+--     structs <- asks envStructs
+--     typeSem <- typeExprSem typeExpr
+--     (clsFound, classes') <- case expCls typeSem of
+--         Just (Left cid) -> do
+--             when (aliasName `M.member` classes) $
+--                 throwAt pos $ (
+--                     "Class `" ++ aliasName ++ "' already exists")
+--             return (True, M.insert aliasName cid classes)
+--         Just (Right _ctid) -> do
+--             notYetAt pos "Just (Right ctid)"
+--         Nothing -> return (False, classes)
+--     (strFound, structs') <- case expStr typeSem of
+--         Just (Left sid) -> do
+--             when (aliasName `M.member` structs) $
+--                 throwAt pos $ (
+--                     "Struct `" ++ aliasName ++ "' already exists")
+--             return (True, M.insert aliasName sid structs)
+--         Just (Right _stid) -> do
+--             notYetAt pos "Just (Right stid)"
+--         Nothing -> return (False, structs)
+--     when (not $ clsFound || strFound) $ do
+--         error "not $ clsFound || strFound"
+--     modifyEnv $ \env -> env {
+--             envClasses=classes',
+--             envStructs=structs'
+--         }
+--     queueNextLevel $ do
+    hoistingDone
 
-hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) compilePrev = do
+hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
     let (TypeDefinition_Class ident mTmplSgn _ superClsExprs variants decls) = clsDef
     let UpperIdent (pos, clsName) = ident
     beforeClasses <- asks envClasses
@@ -334,18 +360,20 @@ hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) compilePrev = do
         throwAt pos ("Class `" ++ clsName ++ "' already defined")
     assertTmplSgnEmpty mTmplSgn
     _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
-    (cid, cls) <- compileClass ident mTmplSgn superClsExprs variants decls hoistClsDecl
-    glob <- gets sstGlob
-    let glob' = glob{
-            globClasses=M.insert cid cls $ globClasses glob
-        }
-    modify $ \sst -> sst{sstGlob=glob'}
+    cid <- newCid
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
-    return compilePrev
+    queueNextLevel2 $ do
+        cls <- compileClass cid ident mTmplSgn superClsExprs variants decls hoistClsDecl
+        glob <- gets sstGlob
+        let glob' = glob{
+                globClasses=M.insert cid cls $ globClasses glob
+            }
+        modify $ \sst -> sst{sstGlob=glob'}
+        hoistingDone
 
-hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) compilePrev = do
+hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
     let (TypeDefinition_Struct ident mTmplSgn _ superStrExprs decls) = strDef
     let UpperIdent (strPos, strName) = ident
     beforeClasses <- asks envClasses
@@ -357,105 +385,118 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) compilePrev = do
     assertTmplSgnEmpty mTmplSgn
     _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
     sid <- newSid
-    cid <- do
-        (cid, cls) <- compileClass ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
-        glob <- gets sstGlob
-        let glob' = glob{
-                globClasses=M.insert cid cls $ globClasses glob
-            }
-        modify $ \sst -> sst{sstGlob=glob'}
-        modifyEnv $ \env -> env {
-                envClasses=M.insert strName cid beforeClasses
-            }
-        return cid
+    cid <- newCid
     fStrPos <- completePos strPos
-    let compile = do
-        compilePrev
-        glob <- gets sstGlob
-        let initImpls = M.fromList [(cid, M.empty)]
-        (revAttrs, impls) <- foldl (>>=) (return ([], initImpls)) $ map (hoistStrDecl cid) decls
-        let attrs = reverse revAttrs
-        let
-            attrsMap = M.fromList attrs
-            struct = StructDesc {
-                structName=strName,
-                structCid=cid,
-                structAttrs=attrsMap,
-                structClasses=impls,
-                structCtor=FunImpl $ constructor,
-                structCtorSgn=ctorSgn
-            }
-            constructor argTuples = do
-                mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
-            ctorSgn = FunSgn {
-                mthRetType=Just cid,
-                mthArgs=map attrToArg $ attrs
-            }
-            attrToArg (attrName, attrCid) = ArgSgn {
-                argName=Just attrName,
-                argType=attrCid,
-                argHasDefault=False,  -- TODO?
-                argDefPos=fStrPos
-            }
-            exeCtorBody = mkExe $ \_ re mem -> let
-                vars = frameContent $ memFrame mem
-                (pt, mem') = allocObject Object {
-                        objSid=sid,
-                        objAttrs=M.intersection vars attrsMap
-                    } mem
-                mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
-                -- TODO: execute custom contructor body/init method?
-                in (reReturn re) (ValRef pt) re mem''
-            glob' = glob{
-                globStructs=M.insert sid struct $ globStructs glob
-            }
-            in modify $ \sst -> sst{sstGlob=glob'}
     modifyEnv $ \env -> env {
-            envStructs=M.insert strName sid beforeStructs
+            envStructs=M.insert strName sid beforeStructs,
+            envClasses=M.insert strName cid beforeClasses
         }
-    return compile
+    queueNextLevel2 $ do  -- 2
+        cls <- compileClass cid ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
+        modify $ \sst -> let
+            glob = sstGlob sst
+            glob' = glob{
+                    globClasses=M.insert cid cls $ globClasses glob
+                }
+            in sst{sstGlob=glob'}
+        queueNextLevel $ do  -- 3
+            let initImpls = M.fromList [(cid, M.empty)]
+            revAttrs <- foldl (>>=) (return []) $ map (hoistStrAttr cid) decls
+            let attrs = reverse revAttrs
+                attrsMap = M.fromList attrs
+                structStub = StructDesc {
+                    structName=strName,
+                    structCid=cid,
+                    structAttrs=attrsMap,
+                    structClasses=error "Undefined structClasses",
+                    structCtor=error "Undefined structCtor",
+                    structCtorSgn=error "Undefined structCtorSgn"
+                }
+            modify $ \sst -> let
+                glob = sstGlob sst
+                glob' = glob{
+                        globStructs=M.insert sid structStub $ globStructs glob
+                    }
+                in sst{sstGlob=glob'}
+            queueNextLevel2 $ do  -- 5
+                impls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
+                let struct = structStub {
+                        structClasses=impls,
+                        structCtor=FunImpl $ constructor,
+                        structCtorSgn=ctorSgn
+                    }
+                    constructor argTuples = do
+                        mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
+                    ctorSgn = FunSgn {
+                        mthRetType=Just cid,
+                        mthArgs=map attrToArg $ attrs
+                    }
+                    attrToArg (attrName, attrCid) = ArgSgn {
+                        argName=Just attrName,
+                        argType=attrCid,
+                        argHasDefault=False,  -- TODO?
+                        argDefPos=fStrPos
+                    }
+                    exeCtorBody = mkExe $ \_ re mem -> let
+                        vars = frameContent $ memFrame mem
+                        (pt, mem') = allocObject Object {
+                                objSid=sid,
+                                objAttrs=M.intersection vars attrsMap
+                            } mem
+                        mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
+                        -- TODO: execute custom contructor body/init method?
+                        in (reReturn re) (ValRef pt) re mem''
+                modify $ \sst -> let
+                    glob = sstGlob sst
+                    glob' = glob{
+                            globStructs=M.insert sid struct $ globStructs glob
+                        }
+                    in sst{sstGlob=glob'}
+                hoistingDone
 
-hoistStmt (Stmt_Decl Decl_Pass) compilePrev = return compilePrev
+hoistStmt (Stmt_Decl Decl_Pass) = hoistingDone
 
-hoistStmt (Stmt_Decl decl) _compilePrev = do
+hoistStmt (Stmt_Decl decl) = do
     notYet $ "Hoisting for `" ++ (printTree decl) ++ "'"
 
-hoistStmt _stmt compilePrev = return compilePrev
+hoistStmt _stmt = hoistingDone
 
 
-hoistVar :: Cid -> Bool -> LowerIdent -> Semantic () -> Semantic (Semantic ())
-hoistVar cid mutable (LowerIdent (pos, varName)) compilePrev = do
-    vars <- asks envVars
-    fpos <- completePos pos
-    case M.lookup varName vars of
-        Just var -> do
-            throwAt pos (
-                "variable redefined: `" ++ varName ++ "'\n" ++
-                "Previously defined at " ++ (showPos $ varDefPos var))
-        Nothing -> do
-            let var = VarType {
-                varClass=cid,
-                varMutable=mutable,
-                varDefPos=fpos
-            }
-            modifyEnv $ \env -> env{envVars=M.insert varName var vars}
-            return compilePrev
+hoistVar :: Cid -> Bool -> LowerIdent -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+hoistVar cid mutable (LowerIdent (pos, varName)) = do
+    queueNextLevel2 $ queueNextLevel2 $ do
+        vars <- asks envVars
+        fpos <- completePos pos
+        case M.lookup varName vars of
+            Just var -> do
+                throwAt pos (
+                    "variable redefined: `" ++ varName ++ "'\n" ++
+                    "Previously defined at " ++ (showPos $ varDefPos var))
+            Nothing -> do
+                let var = VarType {
+                    varClass=cid,
+                    varMutable=mutable,
+                    varDefPos=fpos
+                }
+                modifyEnv $ \env -> env{envVars=M.insert varName var vars}
+                hoistingDone
 
 
-hoistStrDecl :: Cid -> Decl -> ([(VarName, Cid)], M.Map Cid Impl)
-    -> Semantic ([(VarName, Cid)], M.Map Cid Impl)
-hoistStrDecl _ decl@(FieldDefinition {}) (attrs, impls) = do
+hoistStrAttr :: Cid -> Decl -> [(VarName, Cid)]
+    -> Semantic [(VarName, Cid)]
+hoistStrAttr _ decl@(FieldDefinition {}) attrs = do
     let (FieldDefinition
             typeExpr
-            (LowerIdent (pos, name))
+            (LowerIdent (_pos, name))
             _maybeDefault) = decl
-    typeSem <- typeExprSem typeExpr
-    cid' <- case expCls typeSem of
-        Just (Left cid') -> return cid'
-        _ -> throwAt pos (
-                "typeExpr without cid?")
-    return ((name, cid'):attrs, impls)
-hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) (attrs, impls) = do
+    cid <- typeExprCid typeExpr
+    return $ (name, cid):attrs
+hoistStrAttr _ _ attrs = return attrs
+
+hoistStrDecl :: Cid -> Decl -> (M.Map Cid Impl)
+    -> Semantic (M.Map Cid Impl)
+hoistStrDecl _ (FieldDefinition {}) impls = return impls
+hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
     let (MethodDeclaration
             (LowerIdent (pos, name))
             mTmplSgn
@@ -478,26 +519,22 @@ hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) (attrs, impls) = do
     let propImpl = mkMth fpos $ \pt -> FunImpl $ \args -> do
             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
             mkCall fnSgn defArgs exeBody topLevelFid args'
-    impls' <- addPropToImpls name pos propImpl [ownCid] impls
-    return (attrs, impls')
-hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) (attrs, impls) = do
+    addPropToImpls name pos propImpl [ownCid] impls
+hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) impls = do
     let (PropertyDeclaration
             (LowerIdent (pos, name))
             typeExpr
             getDef
             maybeSet) = propDecl
-    typeSem <- typeExprSem typeExpr
+    cid <- typeExprCid typeExpr
     fpos <- completePos pos
     getter <- case getDef of
         PropDefClause_None -> do
             throwAt pos ("Getter declaration without " ++
                             "definition in struct definition")
         (PropDefClause_Def bodyBlock) -> do
-            retCid <- case expCls typeSem of
-                Just (Left retCid) -> return $ Just retCid
-                _ -> error "typeExpr with semantics but without cid"
             let getterSgn = FunSgn {
-                mthRetType=retCid,
+                mthRetType=Just cid,
                 mthArgs=[]
             }
 --                          outerVars <- asks envVars
@@ -507,7 +544,7 @@ hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) (attrs, impls) = do
                         varClass=ownCid,
                         varDefPos=fpos
                     })], -- M.union outerVars argVars,
-                    envExpectedReturnType=Just retCid,
+                    envExpectedReturnType=Just $ Just cid,
                     envInsideLoop=False
                 }
             exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
@@ -530,8 +567,7 @@ hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) (attrs, impls) = do
         propSetter=setter,
         propDefPos=fpos
     }
-    impls' <- addPropToImpls name pos propImpl [ownCid] impls
-    return (attrs, impls')
+    addPropToImpls name pos propImpl [ownCid] impls
 hoistStrDecl _ (ImplementationDefinition {}) _ = do
     notYet "ImplementationDefinition"
 hoistStrDecl _ (TypeAliasDefinition {}) _ = do
@@ -544,7 +580,7 @@ hoistStrDecl _ (MethodDeclaration (LowerIdent (pos, _)) _ _) _ = do
     throwAt pos $ (
         "Method declaration without definition in " ++
         "struct definition")
-hoistStrDecl _ Decl_Pass acc = return acc
+hoistStrDecl _ Decl_Pass impls = return impls
 
 
 mkMth :: CodePosition -> (MemPt -> FunImpl) -> PropImpl
@@ -555,20 +591,19 @@ mkMth fpos mth = PropImpl {
 }
 
 
-compileClass :: UpperIdent -> MaybeTemplateSgn -> [SuperType] -> [VariantDefinition]
-    -> [Decl] -> HoistClsDeclFun -> Semantic (Cid, ClassDesc)
-compileClass ident mTmplSgn superClsExprs variants decls hoistDecl = do
+compileClass :: Cid -> UpperIdent -> MaybeTemplateSgn -> [SuperType] -> [VariantDefinition]
+    -> [Decl] -> HoistClsDeclFun -> Semantic ClassDesc
+compileClass cid ident mTmplSgn superClsExprs variants decls hoistDecl = do
     let UpperIdent (clsPos, clsName) = ident
     assertTmplSgnEmpty mTmplSgn
     _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
     when (not $ null variants) $ notYetAt clsPos "variants"
-    cid <- newCid
     props <- foldl (>>=) (return M.empty) $ map (hoistDecl cid) decls
     let cls = ClassDesc {
             className_=clsName,
             classProps_=props
         }
-    return (cid, cls)
+    return cls
 
 type HoistClsDeclFun = Cid -> Decl -> M.Map VarName VarType
     -> Semantic (M.Map VarName VarType)
@@ -627,10 +662,7 @@ hoistClsDecl _ propDecl@(PropertyDeclaration {}) props = do
         MaybeSetClause_None -> return False
         MaybeSetClause_Some PropDefClause_None -> return True
         _ -> throwAt pos "Setter definition in class (only declarations allowed)"
-    typeSem <- typeExprSem typeExpr
-    propCid <- case expCls typeSem of
-        Just (Left propCid) -> return propCid
-        _ -> error "typeExpr with semantics but without cid"
+    propCid <- typeExprCid typeExpr
     fpos <- completePos pos
     let propType = VarType {
             varMutable=mutable,
@@ -846,6 +878,133 @@ stmtSem stmt = notYet $ printTree stmt
 
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+--                                                                            --
+--                             typechecking                                   --
+--                                                                            --
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
+
+data TypeExpr = ClsExpr {
+                    typeCid :: Cid
+              } | StrExpr {
+                    typeSid :: Sid,
+                    typeCid :: Cid
+              }
+
+typeExprSem :: Expr -> Semantic TypeExpr
+typeExprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
+    maybeSid <- asks $ (M.lookup typeName).envStructs
+    maybeCid <- asks $ (M.lookup typeName).envClasses
+    when (isNothing maybeSid && isNothing maybeCid) $ do
+        throwAt pos ("Undefined class name: `" ++ typeName ++ "'")
+    let cid = fromJust maybeCid
+    case maybeSid of
+        Just sid -> do
+            return $ StrExpr sid cid
+        Nothing -> do
+            return $ ClsExpr cid
+typeExprSem (Expr_FnType sgnExpr@(FnSignature_ (Tok_LP (pos, _)) _ _)) = do
+    (fnSgn, defArgs) <- fnSignatureSem sgnExpr
+    when (not $ M.null defArgs) $
+        throwAt pos "default argument values specified in method type signature"
+    cid <- getFunctionCid fnSgn
+    return $ ClsExpr cid
+typeExprSem (Expr_TmplAppl _ (Tok_LTP (pos, _)) _) = do
+    notYetAt pos "Expr_TmplAppl"
+typeExprSem (Expr_NestedType _ (UpperIdent (pos, _))) = do
+    notYetAt pos "Expr_NestedType"
+typeExprSem (Expr_TypeVar (DollarIdent (pos, _))) = do
+    notYetAt pos "Expr_TypeVar"
+typeExprSem (Expr_Parens _ [expr]) = typeExprSem expr
+typeExprSem expr = do
+    throwError $ SErr $ "`" ++ (printTree expr) ++ "' is not a proper type name"
+
+typeExprCid :: Expr -> Semantic Cid
+typeExprCid expr = do
+    typeExpr <- typeExprSem expr
+    return $ typeCid typeExpr
+
+
+deduceType :: Expr -> Semantic Cid
+deduceType (Expr_Char _) = return (stdClss M.! "Char")
+-- deduceType (Expr_String c) _ =
+-- deduceType (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
+deduceType (Expr_Int _) = return (stdClss M.! "Int")
+-- deduceType (Expr_Tuple _) _ = ???
+-- deduceType (Expr_Array _) _ = ???
+deduceType (Expr_Var (LowerIdent (pos, varName))) = do
+    vars <- asks envVars
+    case M.lookup varName vars of
+        Just (VarType _ cid _) -> return cid
+        Nothing -> throwAt pos $ "Undefined variable `" ++ varName ++ "'"
+
+deduceType (Expr_Not _) = return (stdClss M.! "Bool")
+deduceType (Expr_RelOper {}) = return (stdClss M.! "Bool")
+
+deduceType (Expr_Add {}) = return (stdClss M.! "Int")
+deduceType (Expr_Sub {}) = return (stdClss M.! "Int")
+deduceType (Expr_Mul {}) = return (stdClss M.! "Int")
+-- deduceType (Expr_Div {}) = ??? / {}
+deduceType (Expr_IntDiv {}) = return (stdClss M.! "Int")
+deduceType (Expr_Mod {}) = return (stdClss M.! "Int")
+deduceType (Expr_Minus expr) = deduceType expr
+
+deduceType (Expr_Lambda (Tok_Fn (pos, _)) signature _) = do
+    (fnSgn, defArgs) <- fnSignatureSem signature
+    when (not $ M.null defArgs) $ do
+        throwAt pos "FUCK THAT IN PARTICULAR"
+    getFunctionCid fnSgn
+
+deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
+    typeExpr <- typeExprSem expr
+    case typeExpr of
+        ClsExpr _cid -> notYetAt pos "Class reflection"
+        StrExpr sid _ -> do
+            struct <- gets $ (!!! sid).globStructs.sstGlob
+            getFunctionCid $ structCtorSgn struct
+
+deduceType (Expr_Field expr (LowerIdent (pos, attrName))) = do
+    objCid <- deduceType expr
+    structs <- gets $ globStructs.sstGlob
+    case filter ((objCid ==).structCid.snd) $ M.toList structs of
+        [] -> throwAt pos ("Unable to deduce struct type of expression `" ++
+                           (printTree expr) ++ "'. Attrs are not accesible")
+        [(_sid, struct)] -> case M.lookup attrName $ structAttrs struct of
+            Just cid -> return cid
+            Nothing -> throwAt pos ("Struct of type `" ++ (structName struct) ++
+                                    "' has no attr named `" ++ attrName ++ "'")
+        _ -> error "WTF: duplicated struct cids"
+
+deduceType (Expr_Prop expr (LowerIdent (pos, propName))) = do
+    objCid <- deduceType expr
+    cls <- gets $ (!!! objCid).globClasses.sstGlob
+    liftM varClass $ case M.lookup propName $ classProps cls of
+        Just propType -> return propType
+        Nothing -> throwAt pos (
+            "Object of class `" ++ className cls ++
+            "' has no property named `" ++ propName ++ "'")
+
+deduceType (Expr_FunCall expr (Tok_LP (pos, _)) _) = do
+    funCid <- deduceType expr
+    classes <- gets $ globClasses.sstGlob
+    case classes !!! funCid of
+        ClassFun fnSgn -> do
+            case mthRetType fnSgn of
+                Nothing -> return $ stdClss M.! "Void"
+                Just cid -> return cid
+        ClassDesc {className_=clsName} -> do
+            -- TODO: in future, being function derivative should be enough
+            throwAt pos ("Trying to call `" ++ (printTree expr) ++ "' " ++
+                         "of type `" ++ clsName ++ "', which is not a function")
+
+deduceType (Expr_Parens _ [expr]) = deduceType expr
+
+-- deduceType (Expr_Parens exprs) = {- tuple -}
+
+deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
+
+
+-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 --                                 _____                                      --
 --           ___  _  ______  _____/ ___/___  ____ ___                         --
 --          / _ \| |/_/ __ \/ ___/\__ \/ _ \/ __ `__ \                        --
@@ -855,14 +1014,6 @@ stmtSem stmt = notYet $ printTree stmt
 --                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
-
-typeExprSem :: Expr -> Semantic ExprSem
-typeExprSem typeExpr = do
-    sem <- exprSem typeExpr
-    case sem of
-        TypeValue {} -> return sem
-        _ -> throwError $ SErr{-P pos-} ("`" ++ (printTree typeExpr) ++
-                                         "' is not a proper type name")
 
 exprSem :: Expr -> Semantic ExprSem
 exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
@@ -953,30 +1104,16 @@ exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
     return $ RValue cid $ mkExe $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
-exprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
-    maybeSid <- asks $ (M.lookup typeName).envStructs
-    maybeCid <- asks $ (M.lookup typeName).envClasses
-    when (isNothing maybeSid && isNothing maybeCid) $ do
-        throwAt pos ("Undefined class name: `" ++ typeName ++ "'")
-    case maybeSid of
-        Just sid -> do
+exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
+    typeExpr <- typeExprSem expr
+    case typeExpr of
+        ClsExpr _cid -> notYetAt pos "Class reflection"
+        StrExpr sid _ -> do
             struct <- gets $ (!!! sid).globStructs.sstGlob
-            let rvalExe = mkExe $ \ke -> ke $ ValFunction $ structCtor struct
             cid <- getFunctionCid $ structCtorSgn struct
-            return $ TypeValue {
-                expCid=cid,
-                expRValue=rvalExe,
-                expCls=maybeCid >>= (return.Left),
-                expStr=maybeSid >>= (return.Left)
-            }
-        Nothing -> do
-            cid <- fakeCid
-            return $ TypeValue {
-                expCid=cid,
-                expRValue=error "pure class reflection not implemented",
-                expCls=maybeCid >>= (return.Left),
-                expStr=Nothing
-            }
+            return $ RValue cid $ mkExe $ \ke -> do
+                ke $ ValFunction $ structCtor struct
+
 
 exprSem (Expr_Field expr (LowerIdent (pos, attrName))) = do
     exee <- exprSem expr
@@ -1047,7 +1184,7 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                 Just cid -> return cid
         ClassDesc {className_=clsName} -> do
             -- TODO: in future, being function derivative should be enough
-            throwAt pos ("Trying to call `" ++ (printTree expr) ++ "'" ++
+            throwAt pos ("Trying to call `" ++ (printTree expr) ++ "' " ++
                          "of type `" ++ clsName ++ "', which is not a function")
     return $ RValue cid $ mkExe $ \kv -> do
         execRValue exeFn $ \(ValFunction fnImpl) -> do
@@ -1088,10 +1225,7 @@ fnSignatureSem (FnSignature_ _ args optResType) = do
     retType <- case optResType of
         OptResultType_None -> return Nothing
         OptResultType_Some typeExpr -> do
-            typeSem <- typeExprSem typeExpr
-            case expCls typeSem of
-                Just (Left retCid) -> return $ Just retCid
-                _ -> error "typeExpr with semantics but without cid"
+            liftM Just $ typeExprCid typeExpr
     let funSgn = FunSgn {
         mthRetType=retType,
         mthArgs=(map fst argTuples)
@@ -1108,10 +1242,7 @@ fnSignatureSem (FnSignature_ _ args optResType) = do
                                             "default value specified (may " ++
                                             "change in future)")
                 MaybeDefaultVal_None -> return ()
-            typeSem <- typeExprSem typeExpr
-            cid <- case expCls typeSem of
-                Just (Left cid) -> return cid
-                _ -> error "typeExpr with semantics but without cid"
+            cid <- typeExprCid typeExpr
             return $ (ArgSgn {
                 argName=Nothing,
                 argType=cid,
@@ -1126,10 +1257,7 @@ fnSignatureSem (FnSignature_ _ args optResType) = do
                 MaybeDefaultVal_Some expr -> do
                     defExe <- liftM expRValue $  exprSem expr
                     return (True, Just $ defExe)
-            typeSem <- typeExprSem typeExpr
-            cid <- case expCls typeSem of
-                Just (Left cid) -> return cid
-                _ -> error "typeExpr with semantics but without cid"
+            cid <- typeExprCid typeExpr
             return $ (ArgSgn {
                 argName=Just name,
                 argType=cid,
@@ -1211,7 +1339,7 @@ intBinopSem op exp1 exp2 = do
 assertTmplSgnEmpty :: MaybeTemplateSgn -> Semantic ()
 assertTmplSgnEmpty mTmplSgn =
     case mTmplSgn of
-        MaybeTemplateSgn_Some (_:_) -> notYet "Templates"
+        MaybeTemplateSgn_Some _ (_:_) -> notYet "Templates"
         _ -> return ()
 
 throwAt :: (Int, Int) -> String -> Semantic a

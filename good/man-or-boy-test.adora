@@ -10,9 +10,7 @@ let a = fn(Int k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () -> 
     else:
         return b()
 
-let x = fn(Int i) -> Object:
-    # typy funkcji za bardzo nie działają, ale `Object`
-    # daje się użyć przy braku statycznych sprawdzeń typu
+let x = fn(Int i) -> (Int _) -> Int:
     return fn(Int _) -> Int:
         return i
 

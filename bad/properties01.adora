@@ -8,4 +8,4 @@ struct Foo():
 
 Foo().foo = 1
 
-# COMPILATION ERROR #
+# EXPECTED COMPILATION ERROR #

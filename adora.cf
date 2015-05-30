@@ -25,6 +25,7 @@ position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
 position token Tok_LP '(' ;
+position token Tok_LTP '<''!' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
 position token DollarIdent ('$' letter (letter | digit | '_')*) ;
@@ -88,7 +89,7 @@ TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn Tok_
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
-MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= "<!" [TypeParamDef] "!>" ;
+MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= Tok_LTP [TypeParamDef] "!>" ;
 
 separator TypeParamDef "," ;
 TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
@@ -214,7 +215,7 @@ Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to 
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_TupSubscr. Expr10 ::= Expr10 "." Integer ;  -- tuple subscript
 Expr_FunCall.   Expr10 ::= Expr10 Tok_LP [FunCallArg] ")" ;
-Expr_TmplAppl.  Expr10 ::= Expr10 "<!" [Expr] "!>" ;
+Expr_TmplAppl.  Expr10 ::= Expr10 Tok_LTP [Expr] "!>" ;
 Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
 
 separator FunCallArg "," ;

@@ -220,11 +220,6 @@ data ExprSem = RValue {
                 expCid :: Cid,
                 expRValue :: Exe VarVal,
                 setLValue :: VarVal -> Exe ()
-            } | TypeValue {
-                expCid :: Cid,
-                expRValue :: Exe VarVal, -- reflection only
-                expCls :: Maybe (Either Cid CTid),
-                expStr :: Maybe (Either Sid STid)
             }
 
 execRValue :: ExprSem -> SemiCont VarVal
