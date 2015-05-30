@@ -764,10 +764,7 @@ stmtSem (Stmt_Assign lexpr (Tok_Assign (pos, _)) rexpr) = do
                 return $ mkExe $ \k -> do
                     execRValue rexe $ \val -> exec (setLValue lexe val) k
             else do
-                lcls <- getCls $ expCid lexe
-                rcls <- getCls $ expCid rexe
-                throwAt pos ("Value of type `" ++ (className lcls) ++ "' expected, `" ++
-                             (className rcls) ++ "' found")
+                typeMismatch (expCid lexe) (expCid rexe) pos
         _ -> throwAt pos "Left side of assignment is not assignable"
 
 stmtSem (Stmt_If {}) = error "Stmt_If should have been handled by stmtSeqSem"
@@ -834,10 +831,7 @@ stmtSem (Stmt_ReturnValue (Tok_Return (pos, _)) expr) = do
         Just (Just expectedCid) -> do
             eexe <- exprSem expr
             when ((expCid eexe) /= expectedCid) $ do
-                expCls <- getCls $ expectedCid
-                actCls <- getCls $ expCid eexe
-                throwAt pos ("Value of type `" ++ (className expCls) ++ "' expected, `" ++
-                             (className actCls) ++ "' found")
+                typeMismatch expectedCid (expCid eexe) pos
             return $ mkExe $ \_ -> execRValue eexe $ \val re -> reReturn re val re
         Nothing ->
             throwAt pos ("Unexpected return statement " ++
@@ -1267,24 +1261,28 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
                 argHasDefault=False
             }, Nothing, fpos)
         argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, name)) defVal) = do
+            argCid <- typeExprCid typeExpr
             fpos <- completePos pos
-            -- TODO: process type
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
                 MaybeDefaultVal_Some _ expr -> do
                     case defaultsHandling of
                         AcceptDefaults -> do
+                            defCid <- deduceType expr
+                            when (defCid /= argCid) $ do
+                                typeMismatch argCid defCid pos
                             return (True, Nothing)
                         CompileDefaults -> do
-                            defExe <- liftM expRValue $  exprSem expr
-                            return (True, Just $ defExe)
+                            defSem <- exprSem expr
+                            when ((expCid defSem) /= argCid) $ do
+                                typeMismatch argCid (expCid defSem) pos
+                            return (True, Just $ expRValue defSem)
                         RejectDefaults -> do
                             throwAt pos ("Default argument value " ++
                                         "specification is not allowed here")
-            cid <- typeExprCid typeExpr
             return $ (ArgSgn {
                 argName=Just name,
-                argType=cid,
+                argType=argCid,
                 argHasDefault=hasDef
             }, defExe, fpos)
         argToMap m (_, Nothing, _) = m
@@ -1371,6 +1369,13 @@ throwAt :: (Int, Int) -> String -> Semantic a
 throwAt (ln, col) msg = do
     fileName <- gets sstFileName
     throwError $ SErrP (fileName, ln, col) msg
+
+typeMismatch :: Cid -> Cid -> (Int, Int) -> Semantic a
+typeMismatch expectedCid foundCid pos = do
+    expName <- liftM className $ getCls expectedCid
+    fndName <- liftM className $ getCls foundCid
+    throwAt pos ("Value of type `" ++ expName ++ "' expected, `" ++
+                 fndName ++ "' found")
 
 notYet :: Show a => a -> Semantic b
 notYet = throwError.(SErr).("not yet: " ++).show

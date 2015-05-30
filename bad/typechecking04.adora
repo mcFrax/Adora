@@ -1,0 +1,7 @@
+# zły typ wartości domyślnej argumentu
+
+fn (Int x = true):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking04.adora:3:9: error: Value of type `Int' expected, `Bool' found
