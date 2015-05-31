@@ -4,3 +4,4 @@ else:
     print 42
 
 # EXPECTED COMPILATION ERROR #
+# bad/ifelifelse01.adora:3:1: error: Unexpected else statement

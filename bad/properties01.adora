@@ -1,11 +1,11 @@
 # przypisanie do własności tylko do odczytu
 
 struct Foo():
-    pro foo:
-        Int
+    Int foo:
         get:
             return 42
 
 Foo().foo = 1
 
 # EXPECTED COMPILATION ERROR #
+# bad/properties01.adora:8:11: error: Left side of assignment is not assignable

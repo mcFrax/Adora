@@ -4,3 +4,5 @@ elif true:
     print 42
 
 # EXPECTED COMPILATION ERROR #
+# bad/ifelifelse02.adora:3:1: error: Unexpected elif statement
+#

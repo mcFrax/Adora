@@ -5,3 +5,4 @@ fn ():
         return # błąd
 
 # EXPECTED COMPILATION ERROR #
+# bad/return04.adora:5:9: error: Return statement without value in funtion with return type

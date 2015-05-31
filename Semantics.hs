@@ -560,7 +560,7 @@ hoistVar cid mutable (LowerIdent (pos, varName)) = do
             Just var -> do
                 throwAt pos (
                     "variable redefined: `" ++ varName ++ "'\n" ++
-                    "Previously defined at " ++ (showPos $ varDefPos var))
+                    (showPos $ varDefPos var) ++ ": Previously defined here")
             Nothing -> do
                 let var = VarType {
                     varClass=cid,

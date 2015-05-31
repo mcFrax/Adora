@@ -7,3 +7,4 @@ fn ():
     return 42  # błąd
 
 # EXPECTED COMPILATION ERROR #
+# bad/return01.adora:7:5: error: Return statement with value in funtion returning nothing

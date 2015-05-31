@@ -7,3 +7,4 @@ fn () -> Int:
     return  # błąd
 
 # EXPECTED COMPILATION ERROR #
+# bad/return02.adora:7:5: error: Return statement without value in funtion with return type

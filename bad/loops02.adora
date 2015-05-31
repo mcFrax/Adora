@@ -3,3 +3,4 @@
 continue
 
 # EXPECTED COMPILATION ERROR #
+# bad/loops02.adora:3:1: error: Unexpected continue statement

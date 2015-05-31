@@ -10,3 +10,4 @@ return  # błąd
 return 42  # też błąd
 
 # EXPECTED COMPILATION ERROR #
+# bad/return03.adora:9:1: error: Unexpected return statement outside of function body

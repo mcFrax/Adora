@@ -5,3 +5,4 @@ fn () -> Int:
         return 42 # błąd
 
 # EXPECTED COMPILATION ERROR #
+# bad/return05.adora:5:9: error: Return statement with value in funtion returning nothing

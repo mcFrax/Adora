@@ -8,3 +8,4 @@ elif true:  # błąd
     pass
 
 # EXPECTED COMPILATION ERROR #
+# bad/ifelifelse03.adora:7:1: error: Unexpected elif statement

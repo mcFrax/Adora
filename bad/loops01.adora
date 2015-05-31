@@ -3,3 +3,4 @@
 break
 
 # EXPECTED COMPILATION ERROR #
+# bad/loops01.adora:3:1: error: Unexpected break statement

@@ -6,3 +6,4 @@ let f = fn (Int a, Int b):
 f(a=1, 2)
 
 # EXPECTED COMPILATION ERROR #
+# bad/function-call02.adora:6:2: error: Positional arg after kwargs

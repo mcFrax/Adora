@@ -4,3 +4,5 @@ var a = 1
 var a = 1
 
 # EXPECTED COMPILATION ERROR #
+# bad/redefinition01.adora:4:5: error: variable redefined: `a'
+# bad/redefinition01.adora:3:5: Previously defined here

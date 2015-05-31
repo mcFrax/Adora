@@ -1,6 +1,7 @@
-# W zasadzie jest to poprawny kod, ale wywołujący błąd, dlatego wrzuciłem go do "bad"
+# W zasadzie jest to poprawny kod, ale wywołujący błąd,
+# dlatego wrzuciłem go do "bad"
 
 assert 1 > 2 > 3 > 4
 
 # EXPECTED RUNTIME ERROR #
-# Assertion at bad/assert-false.adora:3:1 failed: 1 > 2 > 3 > 4
+# Assertion at bad/assert-false.adora:4:1 failed: 1 > 2 > 3 > 4

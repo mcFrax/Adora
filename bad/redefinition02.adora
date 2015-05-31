@@ -7,3 +7,4 @@ struct Foo():
     pass
 
 # EXPECTED COMPILATION ERROR #
+# bad/redefinition02.adora:6:8: error: Class `Foo' already defined
