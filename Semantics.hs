@@ -413,9 +413,11 @@ queueNextLevel nextLevel = do
             HoistingEnd aliases -> do
                 return $ HoistingMore aliases $ nextLevel' $ HoistingEnd []
 
-queueNextLevel2 :: TCM (HoistingLevel -> TCM HoistingLevel)
+queueNextLevels :: Integer -> TCM (HoistingLevel -> TCM HoistingLevel)
     -> TCM (HoistingLevel -> TCM HoistingLevel)
-queueNextLevel2 = queueNextLevel.queueNextLevel
+queueNextLevels n queued
+    | n <= 0 = queued
+    | otherwise = queueNextLevels (n-1) $ queueNextLevel queued
 
 queueAlias :: AliasSpec -> TCM (HoistingLevel -> TCM HoistingLevel)
 queueAlias alias = do
@@ -431,13 +433,13 @@ hoistingDone = return $ return
 
 hoistStmt :: Stmt -> TCM (HoistingLevel -> TCM HoistingLevel)
 hoistStmt (Stmt_Let ident _ expr) = do
-    queueNextLevel $ queueNextLevel2 $ queueNextLevel2 $ do
+    queueNextLevels 5 $ do
         cid <- deduceType expr
         hoistVar cid False ident
 hoistStmt (Stmt_LetTuple {}) = do
     notYet $ "hoistStmt (Stmt_LetTuple ..)"
 hoistStmt (Stmt_Var ident _ expr) = do
-    queueNextLevel $ queueNextLevel2 $ queueNextLevel2 $ do
+    queueNextLevels 5 $ do
         cid <- deduceType expr
         hoistVar cid True ident
 hoistStmt (Stmt_Decl (TypeAliasDefinition ident _ typeExpr)) = do
@@ -456,7 +458,7 @@ hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
-    queueNextLevel2 $ do
+    queueNextLevels 2 $ do
         _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
         cls <- compileClass cid ident mTmplSgn superClsExprs variants decls hoistClsDecl
         glob <- gets sstGlob
@@ -489,7 +491,7 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                     globStructs=M.insert sid newDesc $ globStructs glob
                 }
             in sst{sstGlob=glob'}
-    queueNextLevel2 $ do  -- 2
+    queueNextLevels 2 $ do  -- 2
         _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
         cls <- compileClass cid ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
         modify $ \sst -> let
@@ -512,7 +514,7 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
             updateDesc structStub
-            queueNextLevel2 $ do  -- 5
+            queueNextLevels 2 $ do  -- 5
                 let struct = structStub {
                         structCtor=FunImpl $ constructor,
                         structCtorSgn=ctorSgn
