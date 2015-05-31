@@ -1,0 +1,13 @@
+class Foo():
+    pass
+
+class Bar():
+    Foo foo:
+        get
+
+class Baz():
+    BarAlias bar:
+        get
+        set
+
+type BarAlias = Bar

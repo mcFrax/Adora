@@ -404,8 +404,8 @@ hoisted stmts innerSem = do
 queueNextLevel :: TCM (HoistingLevel -> TCM HoistingLevel)
     -> TCM (HoistingLevel -> TCM HoistingLevel)
 queueNextLevel nextLevel = do
-    nextLevel' <- nextLevel
     return $ \hoistingAcc -> do
+        nextLevel' <- nextLevel
         case hoistingAcc of
             HoistingMore aliases hoistingAcc' -> do
                 return $ HoistingMore aliases $ do
@@ -431,13 +431,15 @@ hoistingDone = return $ return
 
 hoistStmt :: Stmt -> TCM (HoistingLevel -> TCM HoistingLevel)
 hoistStmt (Stmt_Let ident _ expr) = do
-    cid <- deduceType expr
-    hoistVar cid False ident
+    queueNextLevel $ queueNextLevel2 $ queueNextLevel2 $ do
+        cid <- deduceType expr
+        hoistVar cid False ident
 hoistStmt (Stmt_LetTuple {}) = do
     notYet $ "hoistStmt (Stmt_LetTuple ..)"
 hoistStmt (Stmt_Var ident _ expr) = do
-    cid <- deduceType expr
-    hoistVar cid True ident
+    queueNextLevel $ queueNextLevel2 $ queueNextLevel2 $ do
+        cid <- deduceType expr
+        hoistVar cid True ident
 hoistStmt (Stmt_Decl (TypeAliasDefinition ident _ typeExpr)) = do
     let UpperIdent (pos, aliasName) = ident
     fpos <- completePos pos
@@ -450,12 +452,12 @@ hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
     when (clsName `M.member` beforeClasses) $
         throwAt pos ("Class `" ++ clsName ++ "' already defined")
     assertTmplSgnEmpty mTmplSgn
-    _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
     cid <- newCid
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
     queueNextLevel2 $ do
+        _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
         cls <- compileClass cid ident mTmplSgn superClsExprs variants decls hoistClsDecl
         glob <- gets sstGlob
         let glob' = glob{
@@ -474,7 +476,6 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
     when (strName `M.member` beforeStructs) $
         throwAt strPos ("Struct `" ++ strName ++ "' already defined")
     assertTmplSgnEmpty mTmplSgn
-    _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
     sid <- newSid
     cid <- newCid
     modifyEnv $ \env -> env {
@@ -489,6 +490,7 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                 }
             in sst{sstGlob=glob'}
     queueNextLevel2 $ do  -- 2
+        _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
         cls <- compileClass cid ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
         modify $ \sst -> let
             glob = sstGlob sst
@@ -553,7 +555,7 @@ hoistStmt _stmt = hoistingDone
 
 hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingLevel -> TCM HoistingLevel)
 hoistVar cid mutable (LowerIdent (pos, varName)) = do
-    queueNextLevel2 $ queueNextLevel2 $ do
+    do
         vars <- asks envVars
         fpos <- completePos pos
         case M.lookup varName vars of

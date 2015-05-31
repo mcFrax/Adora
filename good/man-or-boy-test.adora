@@ -1,8 +1,12 @@
-# Man or boy test: http://en.wikipedia.org/wiki/Man_or_boy_test
-# Implementacja oparta o: http://rosettacode.org/wiki/Man_or_boy_test#Python
+# Man or boy test:
+#     http://en.wikipedia.org/wiki/Man_or_boy_test
+# Implementacja oparta o:
+#     http://rosettacode.org/wiki/Man_or_boy_test#Python
 
-let a = fn(Int k, () -> Int x1, () -> Int x2, () -> Int x3, () -> Int x4, () -> Int x5) -> Int:
-    let b = fn() -> Int:
+type IF = () -> Int
+
+let a = fn(Int k, IF x1, IF x2, IF x3, IF x4, IF x5) -> Int:
+    let b = fn () -> Int:
         k = k-1
         return a(k, b, x1, x2, x3, x4)
     if k <= 0:
