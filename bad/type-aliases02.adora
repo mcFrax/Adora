@@ -1,0 +1,11 @@
+# zapętlone aliasy
+
+type A = B
+type B = C
+type C = A
+
+# EXPECTED COMPILATION ERROR #
+# bad/type-aliases02.adora:5:6: error: Unable to resolve type aliases:
+# bad/type-aliases02.adora:5:6      type C = A
+# bad/type-aliases02.adora:4:6      type B = C
+# bad/type-aliases02.adora:3:6      type A = B

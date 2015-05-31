@@ -1,0 +1,6 @@
+# alias z niezdefiniowanej klasy
+
+type A = B
+
+# EXPECTED COMPILATION ERROR #
+# bad/type-aliases01.adora:3:10: error: Undefined class name: `B'

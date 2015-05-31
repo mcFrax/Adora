@@ -42,28 +42,28 @@ type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] b)
 type StructTemplate = Template StructDesc
 type ClassTemplate = Template ClassDesc
 
-addRule :: ClassRule -> Semantic ()
+addRule :: ClassRule -> TCM ()
 addRule rule = do
     modify $ \sst -> sst{sstClassRules=rule:(sstClassRules sst)}
 
-newCid :: Semantic Cid
+newCid :: TCM Cid
 newCid = do
     sst <- get
     let cid@(Cid cidVal) = sstNextCid sst
     put sst{sstNextCid=Cid $ cidVal + 1}
     return cid
 
-fakeCid :: Semantic Cid
+fakeCid :: TCM Cid
 fakeCid = newCid
 
-newSid :: Semantic Sid
+newSid :: TCM Sid
 newSid = do
     sst <- get
     let sid@(Sid sidVal) = sstNextSid sst
     put sst{sstNextSid=Sid $ sidVal + 1}
     return sid
 
-getFunctionCid :: FunSgn -> Semantic Cid
+getFunctionCid :: FunSgn -> TCM Cid
 getFunctionCid fnSgn = do
     funClasses <- gets sstFunClasses
     case M.lookup fnSgn funClasses of
@@ -80,51 +80,78 @@ getFunctionCid fnSgn = do
             return cid
 
 
-newtype Semantic a = Semantic {
-    runSemantic :: SemState -> LocEnv -> Either Err (SemState, LocEnv, a)
+newtype TCM a = TCM {
+    runTCM :: SemState -> LocEnv -> Either Err (SemState, LocEnv, a)
 }
 
-data Err = Err CodePosition String
+data Err = Err CodePosition ErrType String
          | ErrSomewhere String
 
-instance Monad Semantic where
-    esr1 >>= esr2 = Semantic $ \st env -> do
-        (st', env', x) <- runSemantic esr1 st env
-        runSemantic (esr2 x) st' env'
-    return x = Semantic $ \st env -> return (st, env, x)
+data ErrType = ErrUndefinedType VarName
+             | ErrOther
 
-instance MonadState SemState Semantic where
-    get = Semantic $ \st env -> return (st, env, st)
-    put st = Semantic $ \_ env -> return (st, env, ())
+instance Monad TCM where
+    tcm1 >>= tcm2 = TCM $ \st env -> do
+        (st', env', x) <- runTCM tcm1 st env
+        runTCM (tcm2 x) st' env'
+    return x = TCM $ \st env -> return (st, env, x)
 
-instance MonadReader LocEnv Semantic where
-    ask = Semantic $ \st env -> return (st, env, env)
-    local f (Semantic run) = Semantic $ \st env -> do
+instance MonadState SemState TCM where
+    get = TCM $ \st env -> return (st, env, st)
+    put st = TCM $ \_ env -> return (st, env, ())
+
+instance MonadReader LocEnv TCM where
+    ask = TCM $ \st env -> return (st, env, env)
+    local f (TCM run) = TCM $ \st env -> do
         (st', _, res) <- run st (f env)
         return (st', env, res)
 
 -- environment modifications (tampering with Reader part):
 
-setEnv :: LocEnv -> Semantic ()
-setEnv env = Semantic $ \st _ -> return (st, env, ())
+setEnv :: LocEnv -> TCM ()
+setEnv env = TCM $ \st _ -> return (st, env, ())
 
-modifyEnv :: (LocEnv -> LocEnv) -> Semantic ()
+modifyEnv :: (LocEnv -> LocEnv) -> TCM ()
 modifyEnv f = setEnv =<< (liftM f ask)
 
 -- errors:
 
-throwError :: Err -> Semantic a
-throwError e = Semantic $ \_ _ -> Left e
+throwError :: Err -> TCM a
+throwError e = TCM $ \_ _ -> Left e
+
+throwAt :: (Int, Int) -> String -> TCM a
+throwAt (ln, col) msg = do
+    fileName <- gets sstFileName
+    throwError $ Err (fileName, ln, col) ErrOther msg
+
+typeMismatch :: Cid -> Cid -> (Int, Int) -> TCM a
+typeMismatch expectedCid foundCid pos = do
+    expName <- liftM className $ getCls expectedCid
+    fndName <- liftM className $ getCls foundCid
+    throwAt pos ("Value of type `" ++ expName ++ "' expected, `" ++
+                 fndName ++ "' found")
+
+notYet :: Show a => a -> TCM b
+notYet = throwError.(ErrSomewhere).("not yet: " ++).show
+
+notYetAt :: Show a => (Int, Int) -> a -> TCM b
+notYetAt pos what = throwAt pos $ "not yet: " ++ (show what)
+
+trySem :: TCM a -> TCM (Either Err a)
+trySem tcm = TCM $ \st env -> do
+    case runTCM tcm st env of
+        Right (st', env', x) -> Right (st', env', Right x)
+        Left err -> Right (st, env, Left err)
 
 showSemError :: Err -> String
-showSemError (Err pos s) = do
+showSemError (Err pos _ s) = do
     (showPos pos) ++ ": error: " ++ s
 showSemError (ErrSomewhere s) = "?:?:?: error: " ++ s
 
 showPos :: CodePosition -> String
 showPos (path, ln, col) = path ++ ":" ++ (show ln) ++ ":" ++ (show col)
 
-completePos :: (Int, Int) -> Semantic CodePosition
+completePos :: (Int, Int) -> TCM CodePosition
 completePos (ln, col) = do
     fileName <- gets sstFileName
     return (fileName, ln, col)
@@ -168,12 +195,12 @@ moduleSem :: Module -> String -> Either Err (IO ())
 moduleSem (Module_ stmts) fileName = do
     let Module_ stdlibStmts = stdlib
     (sst0, env0, exe0) <- do
-        case runSemantic (stmtSeqSem stdlibStmts) initSemState initEnv of
+        case runTCM (stmtSeqSem stdlibStmts) initSemState initEnv of
             Right res -> return res
             Left errmsg -> do
                 error ("Error in standard library:\n" ++
                        (showSemError errmsg))
-    (sst, _, exe1) <- runSemantic (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
+    (sst, _, exe1) <- runTCM (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
     let
         runEnv = RunEnv {
             reStructs=globStructs $ sstGlob sst,
@@ -225,10 +252,10 @@ moduleSem (Module_ stmts) fileName = do
                 frameContent=M.empty
             }
 
-stmtBlockSem :: StatementBlock -> Semantic (Exe ())
+stmtBlockSem :: StatementBlock -> TCM (Exe ())
 stmtBlockSem (StatementBlock_ stmts) = local id $ stmtSeqSem stmts
 
-stmtSeqSem :: [Stmt] -> Semantic (Exe ())
+stmtSeqSem :: [Stmt] -> TCM (Exe ())
 stmtSeqSem stmts = do
     hoisted stmts $ stmtSeqSem' stmts
     where
@@ -284,38 +311,125 @@ stmtSeqSem stmts = do
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
-data HoistingLevel = HoistingLevel (Semantic HoistingLevel)
-                   | HoistingEnd
+type AliasSpec = (CodePosition, VarName, Expr)
 
-hoisted :: [Stmt] -> Semantic (Exe a) -> Semantic (Exe a)
+data HoistingLevel = HoistingMore [AliasSpec] (TCM HoistingLevel)
+                   | HoistingEnd [AliasSpec]
+
+hoisted :: [Stmt] -> TCM (Exe a) -> TCM (Exe a)
 hoisted stmts innerSem = do
-    level1 <- (foldl (>>=) (return HoistingEnd)) =<< (mapM hoistStmt stmts)
+    level1 <- (foldl (>>=) (return $ HoistingEnd [])) =<< (mapM hoistStmt stmts)
     hoist level1
     innerSem
     where
-        hoist (HoistingLevel nextLevel) = do
+        hoist (HoistingMore aliases nextLevel) = do
+            makeAliases aliases
             nextLevel' <- nextLevel
             hoist nextLevel'
-        hoist HoistingEnd = return ()
+        hoist (HoistingEnd aliases) = makeAliases aliases
+        makeAliases [] = return ()
+        makeAliases aliases = do
+            let aliases' = flip map aliases $ \(fpos, name, expr) -> do
+                    (fpos, name, expr, Nothing)
+                leftNames = S.fromList $ map (\(_, name, _) -> name) aliases
+            makeAliases' aliases' leftNames
 
-queueNextLevel :: Semantic (HoistingLevel -> Semantic HoistingLevel)
-    -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+        makeAliases' :: [(CodePosition, VarName, Expr, Maybe VarName)]
+            -> S.Set VarName -> TCM ()
+        makeAliases' aliases leftNames = do
+            (aliases', leftNames') <- do
+                foldr (=<<) (return ([], leftNames)) $ map tryMakeAlias aliases
+            if S.null leftNames then do
+                return ()
+            else if (S.size leftNames') < (S.size leftNames) then do
+                makeAliases' aliases' leftNames'
+            else do
+                let aliasLines = flip map aliases $ \(fpos, name, expr, _) -> do
+                    ("\n" ++ (showPos fpos) ++ "      type " ++
+                     name ++ " = " ++ (printTree expr))
+                let (fpos, _, _, _) = head aliases
+                throwError $ Err fpos ErrOther (
+                    "Unable to resolve type aliases:" ++ (foldr (++) "" aliasLines))
+
+        tryMakeAlias alias@(fpos, name, expr, knownDep) (aliases, leftNames) = do
+            let noKnownDeps = do
+                case knownDep of
+                    Nothing -> True
+                    Just dep -> not $ S.member dep leftNames
+            if noKnownDeps then do
+                mType <- tryDeduce expr
+                let success = return (aliases, S.delete name leftNames)
+                case mType of
+                    Right (StrExpr sid cid) -> do
+                        strAlias sid
+                        clsAlias cid
+                        success
+                    Right (ClsExpr cid) -> do
+                        clsAlias cid
+                        success
+                    Left (depName, err) -> do
+                        if S.member depName leftNames then do
+                            let alias' = (fpos, name, expr, Just depName)
+                            return (alias':aliases, leftNames)
+                        else do
+                            throwError err  -- this type is not going to be
+                                            -- found, rethrow
+            else do
+                return (alias:aliases, leftNames)
+            where
+                strAlias sid = do
+                    structs <- asks envStructs
+                    case tryInsert name sid structs of
+                        Right structs' -> do
+                            modifyEnv $ \env -> env{envStructs=structs'}
+                        Left _collidingSid ->
+                            throwError $ Err fpos ErrOther (
+                                "Struct `" ++ name ++ "' already defined")
+                clsAlias cid = do
+                    classes <- asks envClasses
+                    case tryInsert name cid classes of
+                        Right classes' -> do
+                            modifyEnv $ \env -> env{envClasses=classes'}
+                        Left _collidingCid ->
+                            throwError $ Err fpos ErrOther (
+                                "Class `" ++ name ++ "' already defined")
+        tryDeduce expr = do
+            mTypeExpr <- trySem $ typeExprSem expr
+            case mTypeExpr of
+                Right typeExpr -> return $ Right typeExpr
+                Left err@(Err _ (ErrUndefinedType name) _) -> return $ Left (name, err)
+                Left err -> throwError err
+
+
+queueNextLevel :: TCM (HoistingLevel -> TCM HoistingLevel)
+    -> TCM (HoistingLevel -> TCM HoistingLevel)
 queueNextLevel nextLevel = do
     nextLevel' <- nextLevel
     return $ \hoistingAcc -> do
         case hoistingAcc of
-            HoistingLevel hoistingAcc' -> return $ HoistingLevel $ do
-                hoistingAcc' >>= nextLevel'
-            HoistingEnd -> return $ HoistingLevel $ nextLevel' HoistingEnd
+            HoistingMore aliases hoistingAcc' -> do
+                return $ HoistingMore aliases $ do
+                    hoistingAcc' >>= nextLevel'
+            HoistingEnd aliases -> do
+                return $ HoistingMore aliases $ nextLevel' $ HoistingEnd []
 
-queueNextLevel2 :: Semantic (HoistingLevel -> Semantic HoistingLevel)
-    -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+queueNextLevel2 :: TCM (HoistingLevel -> TCM HoistingLevel)
+    -> TCM (HoistingLevel -> TCM HoistingLevel)
 queueNextLevel2 = queueNextLevel.queueNextLevel
 
-hoistingDone :: Semantic (HoistingLevel -> Semantic HoistingLevel)
+queueAlias :: AliasSpec -> TCM (HoistingLevel -> TCM HoistingLevel)
+queueAlias alias = do
+    return $ \hoistingAcc -> do
+        case hoistingAcc of
+            HoistingMore aliases hoistingAcc' -> do
+                return $ HoistingMore (alias:aliases) hoistingAcc'
+            HoistingEnd aliases -> do
+                return $ HoistingEnd (alias:aliases)
+
+hoistingDone :: TCM (HoistingLevel -> TCM HoistingLevel)
 hoistingDone = return $ return
 
-hoistStmt :: Stmt -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+hoistStmt :: Stmt -> TCM (HoistingLevel -> TCM HoistingLevel)
 hoistStmt (Stmt_Let ident _ expr) = do
     cid <- deduceType expr
     hoistVar cid False ident
@@ -324,38 +438,10 @@ hoistStmt (Stmt_LetTuple {}) = do
 hoistStmt (Stmt_Var ident _ expr) = do
     cid <- deduceType expr
     hoistVar cid True ident
-hoistStmt (Stmt_Decl (TypeAliasDefinition _ident _ _typeExpr)) = do
-    --TODO
---     let UpperIdent (pos, aliasName) = ident
---     classes <- asks envClasses
---     structs <- asks envStructs
---     typeSem <- typeExprSem typeExpr
---     (clsFound, classes') <- case expCls typeSem of
---         Just (Left cid) -> do
---             when (aliasName `M.member` classes) $
---                 throwAt pos $ (
---                     "Class `" ++ aliasName ++ "' already exists")
---             return (True, M.insert aliasName cid classes)
---         Just (Right _ctid) -> do
---             notYetAt pos "Just (Right ctid)"
---         Nothing -> return (False, classes)
---     (strFound, structs') <- case expStr typeSem of
---         Just (Left sid) -> do
---             when (aliasName `M.member` structs) $
---                 throwAt pos $ (
---                     "Struct `" ++ aliasName ++ "' already exists")
---             return (True, M.insert aliasName sid structs)
---         Just (Right _stid) -> do
---             notYetAt pos "Just (Right stid)"
---         Nothing -> return (False, structs)
---     when (not $ clsFound || strFound) $ do
---         error "not $ clsFound || strFound"
---     modifyEnv $ \env -> env {
---             envClasses=classes',
---             envStructs=structs'
---         }
---     queueNextLevel $ do
-    hoistingDone
+hoistStmt (Stmt_Decl (TypeAliasDefinition ident _ typeExpr)) = do
+    let UpperIdent (pos, aliasName) = ident
+    fpos <- completePos pos
+    queueAlias (fpos, aliasName, typeExpr)
 
 hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
     let (TypeDefinition_Class ident mTmplSgn _ superClsExprs variants decls) = clsDef
@@ -465,7 +551,7 @@ hoistStmt (Stmt_Decl decl) = do
 hoistStmt _stmt = hoistingDone
 
 
-hoistVar :: Cid -> Bool -> LowerIdent -> Semantic (HoistingLevel -> Semantic HoistingLevel)
+hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingLevel -> TCM HoistingLevel)
 hoistVar cid mutable (LowerIdent (pos, varName)) = do
     queueNextLevel2 $ queueNextLevel2 $ do
         vars <- asks envVars
@@ -486,7 +572,7 @@ hoistVar cid mutable (LowerIdent (pos, varName)) = do
 
 
 hoistStrAttr :: Cid -> Decl -> [(VarName, Cid)]
-    -> Semantic [(VarName, Cid)]
+    -> TCM [(VarName, Cid)]
 hoistStrAttr _ decl@(FieldDefinition {}) attrs = do
     let (FieldDefinition
             typeExpr
@@ -497,7 +583,7 @@ hoistStrAttr _ decl@(FieldDefinition {}) attrs = do
 hoistStrAttr _ _ attrs = return attrs
 
 hoistStrDecl :: Cid -> Decl -> (M.Map Cid Impl)
-    -> Semantic (M.Map Cid Impl)
+    -> TCM (M.Map Cid Impl)
 hoistStrDecl _ (FieldDefinition {}) impls = return impls
 hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
     let (MethodDeclaration
@@ -595,7 +681,7 @@ mkMth fpos mth = PropImpl {
 
 
 compileClass :: Cid -> UpperIdent -> MaybeTemplateSgn -> [SuperType] -> [VariantDefinition]
-    -> [Decl] -> HoistClsDeclFun -> Semantic ClassDesc
+    -> [Decl] -> HoistClsDeclFun -> TCM ClassDesc
 compileClass cid ident mTmplSgn superClsExprs variants decls hoistDecl = do
     let UpperIdent (clsPos, clsName) = ident
     assertTmplSgnEmpty mTmplSgn
@@ -609,7 +695,7 @@ compileClass cid ident mTmplSgn superClsExprs variants decls hoistDecl = do
     return cls
 
 type HoistClsDeclFun = Cid -> Decl -> M.Map VarName VarType
-    -> Semantic (M.Map VarName VarType)
+    -> TCM (M.Map VarName VarType)
 
 hoistStrClsDecl :: HoistClsDeclFun
 hoistStrClsDecl _ (FieldDefinition {}) props = return props
@@ -698,7 +784,7 @@ hoistClsDecl _ decl@(MethodDeclaration {}) props = do
 hoistClsDecl _ Decl_Pass props = return props
 
 addPropToImpls :: VarName -> (Int, Int) -> PropImpl -> [Cid] -> M.Map Cid Impl
-    -> Semantic (M.Map Cid Impl)
+    -> TCM (M.Map Cid Impl)
 addPropToImpls name pos propImpl cids impls0 = do
     foldl (>>=) (return impls0) (map addProp' cids)
     where
@@ -707,12 +793,11 @@ addPropToImpls name pos propImpl cids impls0 = do
             return $ M.insert cid impl' impls
 
 addPropToMap :: VarName -> (Int, Int) -> a -> M.Map VarName a
-    -> Semantic (M.Map VarName a)
+    -> TCM (M.Map VarName a)
 addPropToMap name pos propImpl propMap = do
-    case M.insertLookupWithKey (\_ _ x -> x) name propImpl propMap of
-        (Nothing, propMap') -> do
-            return propMap'
-        (Just _, _) -> do
+    case tryInsert name propImpl propMap of
+        Right propMap' -> return propMap'
+        Left _ -> do
             throwAt pos (
                 "Property or method `" ++ name ++ "' already defined")
 
@@ -728,7 +813,7 @@ addPropToMap name pos propImpl propMap = do
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
-stmtSem :: Stmt -> Semantic (Exe ())
+stmtSem :: Stmt -> TCM (Exe ())
 stmtSem (Stmt_Decl _) = return noop
 
 stmtSem (Stmt_Expr expr) = do
@@ -881,9 +966,12 @@ stmtSem stmt = notYet $ printTree stmt
 
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
---                                                                            --
---                             typechecking                                   --
---                                                                            --
+--     __                          __         __           __  _              --
+--    / /___  ______  ___     ____/ /__  ____/ /_  _______/ /_(_)___  ____    --
+--   / __/ / / / __ \/ _ \   / __  / _ \/ __  / / / / ___/ __/ / __ \/ __ \   --
+--  / /_/ /_/ / /_/ /  __/  / /_/ /  __/ /_/ / /_/ / /__/ /_/ / /_/ / / / /   --
+--  \__/\__, / .___/\___/   \__,_/\___/\__,_/\__,_/\___/\__/_/\____/_/ /_/    --
+--     /____/_/                                                               --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
@@ -894,12 +982,14 @@ data TypeExpr = ClsExpr {
                     typeCid :: Cid
               }
 
-typeExprSem :: Expr -> Semantic TypeExpr
+typeExprSem :: Expr -> TCM TypeExpr
 typeExprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
     maybeSid <- asks $ (M.lookup typeName).envStructs
     maybeCid <- asks $ (M.lookup typeName).envClasses
     when (isNothing maybeSid && isNothing maybeCid) $ do
-        throwAt pos ("Undefined class name: `" ++ typeName ++ "'")
+        fpos <- completePos pos
+        throwError $ Err fpos (ErrUndefinedType typeName) $ (
+            "Undefined class name: `" ++ typeName ++ "'")
     let cid = fromJust maybeCid
     case maybeSid of
         Just sid -> do
@@ -920,13 +1010,13 @@ typeExprSem (Expr_Parens _ [expr]) = typeExprSem expr
 typeExprSem expr = do
     throwError $ ErrSomewhere $ "`" ++ (printTree expr) ++ "' is not a proper type name"
 
-typeExprCid :: Expr -> Semantic Cid
+typeExprCid :: Expr -> TCM Cid
 typeExprCid expr = do
     typeExpr <- typeExprSem expr
     return $ typeCid typeExpr
 
 
-deduceType :: Expr -> Semantic Cid
+deduceType :: Expr -> TCM Cid
 deduceType (Expr_Char _) = return (stdClss M.! "Char")
 -- deduceType (Expr_String c) _ =
 -- deduceType (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
@@ -1003,7 +1093,7 @@ deduceType (Expr_Parens _ [expr]) = deduceType expr
 deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
 
 
-getCls :: Cid -> Semantic ClassDesc
+getCls :: Cid -> TCM ClassDesc
 getCls cid = gets $ (!!! cid).globClasses.sstGlob
 
 
@@ -1014,11 +1104,10 @@ getCls cid = gets $ (!!! cid).globClasses.sstGlob
 --         /  __/>  </ /_/ / /   ___/ /  __/ / / / / /                        --
 --         \___/_/|_/ .___/_/   /____/\___/_/ /_/ /_/                         --
 --                 /_/                                                        --
---                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 
-exprSem :: Expr -> Semantic ExprSem
+exprSem :: Expr -> TCM ExprSem
 exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
 -- exprSem (Expr_String c) _ =
 -- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
@@ -1051,7 +1140,7 @@ exprSem expr@(Expr_RelOper {}) = do
         exec sem' $ \maybeVal -> do
             ke $ ValBool $ isJust maybeVal
     where
-        exprSem' :: Expr -> Semantic (Exe (Maybe VarVal))
+        exprSem' :: Expr -> TCM (Exe (Maybe VarVal))
         exprSem' (Expr_RelOper exp1 oper exp2) = do
             e1exe <- exprSem' exp1
             e2exe <- exprSem exp2
@@ -1226,7 +1315,7 @@ data DefaultsHandling = RejectDefaults
                       | CompileDefaults
 
 fnSignatureSem :: FnSignature -> DefaultsHandling
-    -> Semantic (FunSgn, M.Map VarName (Exe VarVal), M.Map VarName CodePosition)
+    -> TCM (FunSgn, M.Map VarName (Exe VarVal), M.Map VarName CodePosition)
 fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
     argTuples <- mapM argSem args
     retType <- case optResType of
@@ -1241,7 +1330,7 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
     let argDefPosMap = foldl argToDefPosMap M.empty argTuples
     return (funSgn, defArgsMap, argDefPosMap)
     where
-        argSem :: FunDef_Arg -> Semantic (ArgSgn, Maybe (Exe VarVal), CodePosition)
+        argSem :: FunDef_Arg -> TCM (ArgSgn, Maybe (Exe VarVal), CodePosition)
         argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, "_")) defVal) = do
             fpos <- completePos pos
             case defVal of
@@ -1346,7 +1435,7 @@ mkCall fnSgn defArgs exeBody closureFid argTuples = do
         -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
 
 
-intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> Semantic ExprSem
+intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> TCM ExprSem
 intBinopSem op exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
@@ -1355,26 +1444,14 @@ intBinopSem op exp1 exp2 = do
             execRValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
 
-assertTmplSgnEmpty :: MaybeTemplateSgn -> Semantic ()
+assertTmplSgnEmpty :: MaybeTemplateSgn -> TCM ()
 assertTmplSgnEmpty mTmplSgn =
     case mTmplSgn of
         MaybeTemplateSgn_Some _ (_:_) -> notYet "Templates"
         _ -> return ()
 
-throwAt :: (Int, Int) -> String -> Semantic a
-throwAt (ln, col) msg = do
-    fileName <- gets sstFileName
-    throwError $ Err (fileName, ln, col) msg
-
-typeMismatch :: Cid -> Cid -> (Int, Int) -> Semantic a
-typeMismatch expectedCid foundCid pos = do
-    expName <- liftM className $ getCls expectedCid
-    fndName <- liftM className $ getCls foundCid
-    throwAt pos ("Value of type `" ++ expName ++ "' expected, `" ++
-                 fndName ++ "' found")
-
-notYet :: Show a => a -> Semantic b
-notYet = throwError.(ErrSomewhere).("not yet: " ++).show
-
-notYetAt :: Show a => (Int, Int) -> a -> Semantic b
-notYetAt pos what = throwAt pos $ "not yet: " ++ (show what)
+tryInsert :: Ord k => k -> a -> M.Map k a -> Either a (M.Map k a)
+tryInsert key val m = do
+    case M.insertLookupWithKey (\_ _ x -> x) key val m of
+        (Nothing, m') -> Right m'
+        (Just colliding, _) -> Left colliding
