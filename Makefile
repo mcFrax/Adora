@@ -8,11 +8,14 @@ GoodExamples := $(wildcard good/*.adora)
 BadExamples := $(wildcard bad/*.adora)
 Examples := $(GoodExamples) $(BadExamples)
 TestBuild :=
+TestBuildMarker := ./testbuild
+OptBuildMarker := ./optbuild
+BuildMarker := $(if $(TestBuild),$(TestBuildMarker),$(OptBuildMarker))
 CommonGHCFlags := -cpp $(if $(TestBuild),-fhpc -prof,-O2) -DUSE_HASKELINE
 
 all: Testadora interpreter
 
-%: %.hs
+%: %.hs $(BuildMarker)
 	ghc $(CommonGHCFlags) -Wall -Werror --make "$<" -o "$@"
 
 interpreter: $(ParserObjects) $(filter-out parselib.hs,$(SourceHs)) StdLib.hs
@@ -25,7 +28,7 @@ Testadora: $(ParserObjects) Testadora.hs
 StdLib.hs: stdlib.adora parselib
 	./parselib stdlib.adora StdLib.hs stdlib
 
-$(ParserObjects): %.o: %.hs $(ParserHs)
+$(ParserObjects): %.o: %.hs $(ParserHs) $(BuildMarker)
 	@# bnfc generated files  - compiled without -Wall and -Werror
 	ghc $(CommonGHCFlags) -w --make "$<"
 
@@ -87,13 +90,22 @@ hpc markup interpreter.tix --destdir=coverage $(patsubst %.hs,--exclude=%,$(Pars
 endef
 
 test-coverage: $(if $(TestBuild),tix-clean test,)
-	$(if $(TestBuild),$(CollectCoverage),$(MAKE) TestBuild=1 clean test-coverage)
+	$(if $(TestBuild),$(CollectCoverage),$(MAKE) TestBuild=1 test-coverage)
 
 $(GoodTestCases): test-case-%: % interpreter
 	@./run-test.py "$<"
 
 $(BadTestCases): test-case-%: % interpreter
 	@./run-test.py "$<"
+
+
+$(TestBuildMarker):
+	if [ -f "$(OptBuildMarker)" ]; then $(MAKE) clean; fi
+	touch $(TestBuildMarker)
+
+$(OptBuildMarker):
+	if [ -f "$(TestBuildMarker)" ]; then $(MAKE) clean; fi
+	touch $(OptBuildMarker)
 
 tix-clean:
 	-rm -f *.tix
@@ -103,6 +115,7 @@ clean: tix-clean
 	-rm -f adora.html adora.pdf Docadora.pdf
 	-rm -f parselib StdLib.hs
 	-rm -rf franciszek_boehlke
+	-rm -f $(TestBuildMarker) $(OptBuildMarker)
 
 distclean: clean
 	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* ErrM.* SharedString.* adora.dtd XMLadora.*

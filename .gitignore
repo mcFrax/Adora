@@ -36,5 +36,7 @@ franciszek_boehlke.zip
 StdLib.hs
 franciszek_boehlke.tar.gz
 .hpc
+*.tix
 coverage
-interpreter.tix
+optbuild
+testbuild
