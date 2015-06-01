@@ -75,14 +75,14 @@ franciszek_boehlke/%: %
 GoodTestCases := $(addprefix test-case-,$(GoodExamples))
 BadTestCases := $(addprefix test-case-,$(BadExamples))
 TestCases := $(GoodTestCases) $(BadTestCases)
-.PHONY: test-students $(TestCases) test-coverage
+.PHONY: test test-students $(TestCases) test-coverage
 
 test-students: franciszek_boehlke.tar.gz students-test-script.sh
 	scp franciszek_boehlke.tar.gz fb320589@students.mimuw.edu.pl:~/jpp/adora
 	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
 
-test: $(TestCases)
-	@echo "All tests passed"
+test: interpreter
+	@./run-test.py $(GoodExamples) $(BadExamples)
 
 define CollectCoverage
 mkdir -p coverage;

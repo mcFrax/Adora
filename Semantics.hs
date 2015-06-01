@@ -1287,8 +1287,7 @@ fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
                 MaybeDefaultVal_None -> return (False, Nothing)
                 MaybeDefaultVal_Some _ expr -> do
                     when unnamed $ do
-                        throwAt pos ("Unnamed arguments cannot have " ++
-                                     "default value specified")
+                        notYetAt pos ("Unnamed argument with default value")
                     case defaultsHandling of
                         AcceptDefaults -> do
                             defCid <- deduceType expr

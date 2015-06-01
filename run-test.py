@@ -4,12 +4,14 @@ import sys
 import subprocess
 
 devnull = open('/dev/null')
+verbose = False
 
 class Failure(Exception):
     pass
 
 def runTest(filename):
-    print "Testing " + filename + "...",
+    if verbose:
+        print "Testing " + filename + "...",
     sys.stdout.flush()
 
     exIn = "# INPUT #"
@@ -95,13 +97,42 @@ def runTest(filename):
                               '\nActual output:\n' +
                               out)
     except Failure, f:
-        print "Failed"
-        print f.message
+        if verbose:
+            print "Failed"
+        sys.stdout.flush()
+        sys.stderr.write(40*'=' + '\n')
+        sys.stderr.write("" + filename + ":0:0: TEST FAILED\n")
+        sys.stderr.write(40*'-' + '\n')
+        sys.stderr.write(f.message)
+        sys.stderr.write(40*'=' + '\n')
+        sys.stderr.flush()
         return False
-    print "OK"
+    if verbose:
+        print "OK"
     return True
 
-assert len(sys.argv) == 2
+if len(sys.argv) > 1 and sys.argv[1] == "--verbose":
+    verbose = True
+    testfiles = sys.argv[2:]
+else:
+    testfiles = sys.argv[1:]
 
-if not runTest(sys.argv[1]):
+testcount = len(testfiles)
+
+if not testcount:
+    sys.stderr.write("No tests specified!\n")
+    sys.exit(1)
+
+successcount = 0
+for testfile in testfiles:
+    if runTest(testfile):
+        successcount += 1
+
+testratio = str(successcount) + '/' + str(testcount)
+
+if successcount == testcount:
+    print "All tests passed (" + testratio + ")\nOK"
+else:
+    sys.stderr.write("tests passed: " + testratio + "\n");
+    sys.stderr.write(str(testcount - successcount) + "tests failed\nFAILED");
     sys.exit(1)
