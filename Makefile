@@ -58,15 +58,15 @@ franciszek_boehlke.tar.gz: $(patsubst %,franciszek_boehlke/%,$(ZipFiles))
 	tar -acf franciszek_boehlke.tar.gz franciszek_boehlke
 
 franciszek_boehlke/README.pdf: adora.pdf
-	mkdir -p $$(dirname "$@")
+	@mkdir -p $$(dirname "$@")
 	cp "$<" "$@"
 
 franciszek_boehlke/Makefile: Makefile
-	mkdir -p $$(dirname "$@")
+	@mkdir -p $$(dirname "$@")
 	sed 's/-D''USE_HASKELINE//g' "$<" > "$@"
 
 franciszek_boehlke/%: %
-	mkdir -p $$(dirname "$@")
+	@mkdir -p $$(dirname "$@")
 	cp "$<" "$@"
 
 GoodTestCases := $(addprefix test-case-,$(GoodExamples))
