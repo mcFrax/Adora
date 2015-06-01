@@ -1,17 +1,18 @@
 # aliasy mogą być definiowane zarówno przed,
 # jak i po aliasowanym typie
 
-type Foo1 = Foo2
-type Foo2 = Foo
+type Foo3 = Foo2
+type Foo2 = Foo1
+type Foo1 = Foo
 struct Foo():
     Int foo
 
-type Foo3 = Foo1
+type Foo4 = Foo3
 
 var foo = Foo(foo=0)
 print foo.[foo]
 
-foo = Foo1(foo=1)
+foo = Foo3(foo=1)
 print foo.[foo]
 
 foo = Foo2(foo=2)

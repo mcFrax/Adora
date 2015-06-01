@@ -1,0 +1,12 @@
+# powtórzona nazwa metody/property w strukturze
+
+struct Foo():
+    Int foo:
+        get:
+            return 1
+    Int foo:
+        get:
+            return 1
+
+# EXPECTED COMPILATION ERROR #
+# bad/redefinition04.adora:7:9: error: Property or method `foo' already defined

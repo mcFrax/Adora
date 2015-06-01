@@ -1,13 +1,14 @@
 Langname := adora
 ParserHsPrefixes := Abs Layout Lex Par Print Skel
-ParserHs := $(addsuffix $(Langname).hs,$(ParserHsPrefixes))
+ParserHs := $(addsuffix $(Langname).hs,$(ParserHsPrefixes)) ErrM.hs
 ParserObjects := $(patsubst %.hs,%.o,$(ParserHs))
 SourceHs := $(filter-out $(ParserHs) StdLib.hs Testadora.hs,$(wildcard *.hs))
-BnfcFiles := $(subst __,$(Langname),Lex__.x Par__.y Doc__.tex Doc__.txt Abs__.hs Print__.hs Layout__.hs Test__.hs Skel__.hs)
+BnfcFiles := $(subst __,$(Langname),Lex__.x Par__.y Doc__.tex Doc__.txt Abs__.hs Print__.hs Layout__.hs Test__.hs Skel__.hs ErrM.hs)
 GoodExamples := $(wildcard good/*.adora)
 BadExamples := $(wildcard bad/*.adora)
 Examples := $(GoodExamples) $(BadExamples)
-CommonGHCFlags := -cpp -O2 -DUSE_HASKELINE
+TestBuild :=
+CommonGHCFlags := -cpp $(if $(TestBuild),-fhpc -prof,-O2) -DUSE_HASKELINE
 
 all: Testadora interpreter
 
@@ -71,7 +72,7 @@ franciszek_boehlke/%: %
 GoodTestCases := $(addprefix test-case-,$(GoodExamples))
 BadTestCases := $(addprefix test-case-,$(BadExamples))
 TestCases := $(GoodTestCases) $(BadTestCases)
-.PHONY: test-students test-good $(TestCases)
+.PHONY: test-students $(TestCases) test-coverage
 
 test-students: franciszek_boehlke.tar.gz students-test-script.sh
 	scp franciszek_boehlke.tar.gz fb320589@students.mimuw.edu.pl:~/jpp/adora
@@ -80,13 +81,24 @@ test-students: franciszek_boehlke.tar.gz students-test-script.sh
 test: $(TestCases)
 	@echo "All tests passed"
 
+define CollectCoverage
+mkdir -p coverage;
+hpc markup interpreter.tix --destdir=coverage $(patsubst %.hs,--exclude=%,$(ParserHs))
+endef
+
+test-coverage: $(if $(TestBuild),tix-clean test,)
+	$(if $(TestBuild),$(CollectCoverage),$(MAKE) TestBuild=1 clean test-coverage)
+
 $(GoodTestCases): test-case-%: % interpreter
 	@./run-test.py "$<"
 
 $(BadTestCases): test-case-%: % interpreter
 	@./run-test.py "$<"
 
-clean:
+tix-clean:
+	-rm -f *.tix
+
+clean: tix-clean
 	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y
 	-rm -f adora.html adora.pdf Docadora.pdf
 	-rm -f parselib StdLib.hs
@@ -94,5 +106,6 @@ clean:
 
 distclean: clean
 	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* ErrM.* SharedString.* adora.dtd XMLadora.*
+	-rm -f coverage/*
 	-rm -f interpreter Testadora
 	-rm -rf franciszek_boehlke.tar.gz

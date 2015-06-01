@@ -222,7 +222,7 @@ Expr_FnType.    Expr9 ::= FSignature ;
 
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
-Expr_Field.     Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
+Expr_Attr.      Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_TupSubscr. Expr10 ::= Expr10 "." Integer ;  -- tuple subscript
 Expr_FunCall.   Expr10 ::= Expr10 Tok_LP [FunCallArg] ")" ;

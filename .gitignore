@@ -35,3 +35,6 @@ franciszek_boehlke.zip
 .adora-history
 StdLib.hs
 franciszek_boehlke.tar.gz
+.hpc
+coverage
+interpreter.tix

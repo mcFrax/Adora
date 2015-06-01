@@ -22,29 +22,11 @@ import StdLib
 
 data SemState = SemState {
     sstGlob :: GlobEnv,
-    sstStructTmpls :: TemplateMap STid StructDesc,
-    sstClassTmpls :: TemplateMap CTid ClassDesc,
     sstFunClasses :: M.Map FunSgn Cid,
     sstNextCid :: Cid,
     sstNextSid :: Sid,
-    sstClassRules :: [ClassRule],
     sstFileName :: String
 }
-
-data ClassRule = ClassRule
-
-data Template a = Tmpl0 a
-                | TmplS Int (Sid -> Template a)
-                | TmplC Int (Cid -> Template a)
-
-type TemplateMap a b = (M.Map a (Template a), M.Map [Either Sid Cid] b)
-
-type StructTemplate = Template StructDesc
-type ClassTemplate = Template ClassDesc
-
-addRule :: ClassRule -> TCM ()
-addRule rule = do
-    modify $ \sst -> sst{sstClassRules=rule:(sstClassRules sst)}
 
 newCid :: TCM Cid
 newCid = do
@@ -52,9 +34,6 @@ newCid = do
     let cid@(Cid cidVal) = sstNextCid sst
     put sst{sstNextCid=Cid $ cidVal + 1}
     return cid
-
-fakeCid :: TCM Cid
-fakeCid = newCid
 
 newSid :: TCM Sid
 newSid = do
@@ -216,20 +195,16 @@ moduleSem (Module_ stmts) fileName = do
                 globClasses=stdGlobClss,
                 globStructs=M.empty
             },
-            sstStructTmpls=(M.empty, M.empty),
-            sstClassTmpls=(M.empty, M.empty),
             sstFunClasses=M.empty,
             sstNextCid=Cid 0,
             sstNextSid=Sid 0,
-            sstClassRules=[],
             sstFileName="<stdlib>"
         }
 
         initEnv = LocEnv {
-            envSuper=Nothing,
             envVars=M.fromList [
-                ("true", VarType True (stdClss M.! "Bool") ("<internal>", 0, 0)),
-                ("false", VarType False (stdClss M.! "Bool") ("<internal>", 0, 0))
+                ("true", VarType True (stdClss M.! "Bool") internalCodePos),
+                ("false", VarType False (stdClss M.! "Bool") internalCodePos)
             ],
             envClasses=stdClss,
             envStructs=M.empty,
@@ -248,7 +223,7 @@ moduleSem (Module_ stmts) fileName = do
             memFrames=M.fromList [(topLevelFid, globFrame)]
         } where
             globFrame = Frame{
-                frameParentId=Nothing,
+                frameParentId=error "Trying to get top frame's parent",
                 frameContent=M.empty
             }
 
@@ -517,7 +492,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
             updateDesc structStub
             queueNextLevels 2 $ do  -- 5
                 let struct = structStub {
-                        structCtor=FunImpl $ constructor,
+                        structCtor=FunImpl ctorSgn constructor,
                         structCtorSgn=ctorSgn
                     }
                     constructor argTuples = do
@@ -576,9 +551,11 @@ hoistStrAttr :: Cid -> InStruct -> [(VarName, Cid)]
 hoistStrAttr _ decl@(InStruct_AttrDefinition {}) attrs = do
     let (InStruct_AttrDefinition
             typeExpr
-            (LowerIdent (_pos, name))
+            (LowerIdent (pos, name))
             _maybeDefault) = decl
     cid <- typeExprCid typeExpr
+    when (elem name $ map fst attrs) $ do
+        throwAt pos $ "Attribute `" ++ name ++ "' already defined"
     return $ (name, cid):attrs
 hoistStrAttr _ _ attrs = return attrs
 
@@ -606,7 +583,7 @@ hoistStrDecl ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})
             envInsideLoop=False
         }
     exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
-    let propImpl = mkMth fpos $ \pt -> FunImpl $ \args -> do
+    let propImpl = mkMth fpos $ \pt -> FunImpl fnSgn $ \args -> do
             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
             mkCall fnSgn defArgs exeBody topLevelFid args'
     addPropToImpls name pos propImpl [ownCid] impls
@@ -1023,7 +1000,7 @@ deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
             struct <- gets $ (!!! sid).globStructs.sstGlob
             getFunctionCid $ structCtorSgn struct
 
-deduceType (Expr_Field expr (LowerIdent (pos, attrName))) = do
+deduceType (Expr_Attr expr (LowerIdent (pos, attrName))) = do
     objCid <- deduceType expr
     structs <- gets $ globStructs.sstGlob
     case filter ((objCid ==).structCid.snd) $ M.toList structs of
@@ -1163,7 +1140,7 @@ exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
     exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
     cid <- getFunctionCid fnSgn
     let lambdaVal closureFid = do
-        ValFunction $ FunImpl $ mkCall fnSgn defArgs exeBody closureFid
+        ValFunction $ FunImpl fnSgn $ mkCall fnSgn defArgs exeBody closureFid
     return $ RValue cid $ mkExe $ \ke re mem -> do
         ke (lambdaVal $ memFid mem) re mem
 
@@ -1178,7 +1155,7 @@ exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
                 ke $ ValFunction $ structCtor struct
 
 
-exprSem (Expr_Field expr (LowerIdent (pos, attrName))) = do
+exprSem (Expr_Attr expr (LowerIdent (pos, attrName))) = do
     exee <- exprSem expr
     let objCid = expCid exee
     structs <- gets $ globStructs.sstGlob
@@ -1292,36 +1269,26 @@ fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
         OptResultType_None -> return Nothing
         OptResultType_Some typeExpr -> do
             liftM Just $ typeExprCid typeExpr
-    let funSgn = FunSgn {
+    let fnSgn = FunSgn {
         mthRetType=retType,
         mthArgs=(map (\(a, _, _) -> a) argTuples)
     }
     let defArgsMap = foldl argToMap M.empty argTuples
     let argDefPosMap = M.fromList $ flip mapMaybe argTuples $ \(as, _, dp) -> do
         (argName as) >>= (\n -> Just (n, dp))
-    return (funSgn, defArgsMap, argDefPosMap)
+    return (fnSgn, defArgsMap, argDefPosMap)
     where
         argSem :: ArgDefinition -> TCM (ArgSgn, Maybe (Exe VarVal), CodePosition)
-        argSem (ArgDefinition_ typeExpr (LowerIdent (pos, "_")) defVal) = do
-            fpos <- completePos pos
-            case defVal of
-                MaybeDefaultVal_Some _ _ -> do
-                    throwAt pos ("Unnamed arguments cannot have " ++
-                                            "default value specified (may " ++
-                                            "change in future)")
-                MaybeDefaultVal_None -> return ()
-            cid <- typeExprCid typeExpr
-            return $ (ArgSgn {
-                argName=Nothing,
-                argType=cid,
-                argHasDefault=False
-            }, Nothing, fpos)
         argSem (ArgDefinition_ typeExpr (LowerIdent (pos, name)) defVal) = do
+            let unnamed = (name == "_")
             argCid <- typeExprCid typeExpr
             fpos <- completePos pos
             (hasDef, defExe) <- case defVal of
                 MaybeDefaultVal_None -> return (False, Nothing)
                 MaybeDefaultVal_Some _ expr -> do
+                    when unnamed $ do
+                        throwAt pos ("Unnamed arguments cannot have " ++
+                                     "default value specified")
                     case defaultsHandling of
                         AcceptDefaults -> do
                             defCid <- deduceType expr
@@ -1334,7 +1301,7 @@ fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
                                 typeMismatch argCid (expCid defSem) pos
                             return (True, Just $ expRValue defSem)
             return $ (ArgSgn {
-                argName=Just name,
+                argName=if unnamed then Nothing else Just name,
                 argType=argCid,
                 argHasDefault=hasDef
             }, defExe, fpos)
@@ -1349,13 +1316,13 @@ fSignatureSem (FSignature_ _ args optResType) = do
         OptResultType_None -> return Nothing
         OptResultType_Some typeExpr -> do
             liftM Just $ typeExprCid typeExpr
-    let funSgn = FunSgn {
+    let fnSgn = FunSgn {
         mthRetType=retType,
         mthArgs=(map fst argTuples)
     }
     let argDefPosMap = M.fromList $ flip mapMaybe argTuples $ \(as, dp) -> do
         (argName as) >>= (\n -> Just (n, dp))
-    return (funSgn, argDefPosMap)
+    return (fnSgn, argDefPosMap)
     where
         argSem :: ArgSignature -> TCM (ArgSgn, CodePosition)
         argSem (ArgSignature_ typeExpr (LowerIdent (pos, name)) isOpt) = do

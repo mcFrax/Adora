@@ -32,7 +32,6 @@ type CidMap = M.Map Cid ClassDesc
 type SidMap = M.Map Sid StructDesc
 
 data LocEnv = LocEnv {
-    envSuper :: Maybe LocEnv,
     envVars :: M.Map VarName VarType,
     envClasses :: M.Map VarName Cid,
     envStructs :: M.Map VarName Sid,
@@ -98,12 +97,13 @@ data PropImpl = PropImpl {
 instance Show PropImpl where
     show _ = "<PropImpl>"
 
-newtype FunImpl = FunImpl {
+data FunImpl = FunImpl {
+    funSgn :: FunSgn,
     funBody :: [(Maybe VarName, Exe VarVal)] -> Exe VarVal
 }
 
 instance Show FunImpl where
-    show _ = "<FunImpl>"
+    show fImpl = "<function " ++ (show $ funSgn fImpl) ++ ">"
 
 
 -- -- --
@@ -120,7 +120,7 @@ data Memory = Memory {
 
 type FrameKey = VarName
 data Frame = Frame {
-    frameParentId :: Maybe Fid,
+    frameParentId :: Fid,
     frameContent :: M.Map FrameKey VarVal
 } deriving Show
 
@@ -202,11 +202,6 @@ mkExe exe = do
 
 runExe :: Exe a -> Cont
 runExe exe = exec exe (\_ _ _ -> return ())
-
-io :: IO a -> SemiCont a
-io ioOp ka re mem = do
-    iores <- ioOp
-    ka iores re mem
 
 noop :: Exe ()
 noop = mkExe ($ ())

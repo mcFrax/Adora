@@ -1,0 +1,8 @@
+# break w funkcji zagnieżdżonej w petli
+
+while true:
+    fn ():
+        break
+
+# EXPECTED COMPILATION ERROR #
+# bad/loops03.adora:5:9: error: Unexpected break statement

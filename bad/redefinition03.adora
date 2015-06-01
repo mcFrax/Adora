@@ -1,0 +1,8 @@
+# powtórzona nazwa metody/property w klasie
+
+class Foo():
+    Int foo
+    Int foo
+
+# EXPECTED COMPILATION ERROR #
+# bad/redefinition03.adora:5:9: error: Property or method `foo' already defined

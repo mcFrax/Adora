@@ -1,0 +1,8 @@
+# powtórzona nazwa atrybutu w strukturze
+
+struct Foo():
+    Int foo
+    Int foo
+
+# EXPECTED COMPILATION ERROR #
+# bad/redefinition05.adora:5:9: error: Attribute `foo' already defined

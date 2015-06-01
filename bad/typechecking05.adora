@@ -1,0 +1,6 @@
+# użycie niezdefiniowanej własności
+
+1.foo
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking05.adora:3:3: error: Object of class `Int' has no property named `foo'

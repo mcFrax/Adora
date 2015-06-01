@@ -18,17 +18,11 @@ memFrame mem = (memFrames mem) !!! (memFid mem)
 memObjAt :: Memory -> MemPt -> Object
 memObjAt mem pt = (memObjects mem) !!! pt
 
-memSetObj :: Memory -> MemPt -> Object -> Memory
-memSetObj mem pt obj = mem{memObjects=M.insert pt obj (memObjects mem)}
-
 memAdjust :: Memory -> MemPt -> (Object -> Object) -> Memory
 memAdjust mem pt f = mem{memObjects=M.adjust f pt (memObjects mem)}
 
 setFid :: Fid -> Memory -> Memory
 setFid fid mem = mem{memFid=fid}
-
-nextPtr :: Memory -> MemPt
-nextPtr mem = nextKey $ memObjects mem
 
 allocObject :: Object -> Memory -> (MemPt, Memory)
 allocObject obj mem = do
@@ -38,14 +32,11 @@ allocObject obj mem = do
 allocFrame :: Fid -> Memory -> (Fid, Memory)
 allocFrame closureFid mem = do
     let frame = Frame{
-        frameParentId=Just closureFid,
+        frameParentId=closureFid,
         frameContent=M.empty
     }
     let (fid, frames) = insertNext frame $ memFrames mem
     (fid, mem{memFrames=frames})
-
-popFrame :: Memory -> Memory
-popFrame mem = mem{memFid=(\(Just fid') -> fid') $ frameParentId $ memFrame mem}
 
 getVar :: FrameKey -> Memory -> VarVal
 getVar k mem = do
@@ -55,7 +46,7 @@ getVar k mem = do
         getVar' f = do
             case M.lookup k (frameContent f) of
                 Just val -> val
-                Nothing -> getVar' (frames !!! ((\(Just fid') -> fid') $ frameParentId f))
+                Nothing -> getVar' (frames !!! (frameParentId f))
 
 allocVar :: FrameKey -> VarVal -> Memory -> Memory
 allocVar k pt mem =
@@ -79,9 +70,7 @@ assignVar k val mem = do
                 Just _ -> let
                     frame' = frame{frameContent=M.insert k val $ frameContent frame}
                     in mem{memFrames=M.insert fid frame' frames}
-                Nothing -> case frameParentId frame of
-                    Just fid' -> getVarPt' fid'
-                    Nothing -> error $ "Variable not found: `" ++ k ++ "'"
+                Nothing -> getVarPt' $ frameParentId frame
 
 class Ord k => MemKey k where
     firstKey :: k
