@@ -36,48 +36,68 @@ position token DollarIdent ('$' letter (letter | digit | '_')*) ;
 -- -- --
 -- Declarations
 
--- Rozbicie rodzajow deklaracji jest nieco drobniejsze, niz bylo to koniecznie
--- potrzebne, dzieki temu jest jednak w miare spojne. Zalezalo mi na tym,
--- zeby wszystkie deklaracje mialy ten sam typ w haskellowej implementacji,
--- a jednoczesnie potrzebowalem niektore rodzaje deklaracji oddzielic.
 
-separator Decl10 ";" ;
-separator Decl11 ";" ;
+TypeDefinition_Alias.        AliasDefinition ::= "type" UpperIdent Tok_Assign Expr9 ;
 
-_.  Decl ::= Decl0 ;  -- declarations available only in class/struct definition
--- _.  Decl ::= Decl1 ;  -- declarations available only outside class/struct definition
-_.  Decl ::= Decl2 ;  -- declarations available everywhere
+TypeDefinition_Class.        ClassDefinition ::=
+        "class" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{"
+            [VariantDefinition]
+            [InClass]
+        "}" ;
 
-_. Decl10 ::= Decl0 ;  -- declarations available in class/struct definition
-_. Decl10 ::= Decl2 ;  -- declarations available in class/struct definition
+    separator VariantDefinition "" ;
+    VariantDefinition_. VariantDefinition ::=
+        "variant" UpperIdent ":" "{" [InStruct] "}" ;
 
--- _. Decl11 ::= Decl1 ;  -- declarations available in outside class/struct definition
-_. Decl11 ::= Decl2 ;  -- declarations available in outside class/struct definition
+    separator InClass ";" ;
+    InClass_Pass.                InClass ::= "pass" ;
+    InClass_AliasDef.            InClass ::= AliasDefinition ;
+    InClass_ClassDef.            InClass ::= ClassDefinition ;
+    InClass_PropertyDeclaration. InClass ::= PropMutability Expr9 LowerIdent ;
+    InClass_MethodDeclaration.   InClass ::= "mth" LowerIdent MaybeTemplateSgn FSignature ;
 
-_.                          Decl0 ::= Decl3 ; -- MethodDeclaration
-MethodDefinition.           Decl0 ::= Decl3 StatementBlock ;
-ImplementationDefinition.   Decl0 ::= "implement" Expr9 ":" "{" [Decl10] "}" ;
-FieldDefinition.            Decl0 ::= Expr9 LowerIdent MaybeDefaultVal ;
-PropertyDeclaration.        Decl0 ::= Expr9 LowerIdent ":" "{" "get" PropDefClause MaybeSetClause "}" ;
+    PropReadOnly.   PropMutability ::=  ;
+    PropWritable.   PropMutability ::= "writable" ;
+
+TypeDefinition_Struct.       StructDefinition ::=
+        "struct" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{"
+            [InStruct]
+        "}" ;
+
+    separator InStruct ";" ;
+    InStruct_Pass.           InStruct ::= "pass" ;
+    InStruct_AliasDef.       InStruct ::= AliasDefinition ;
+    InStruct_ClassDef.       InStruct ::= ClassDefinition ;
+    InStruct_StructDef.      InStruct ::= StructDefinition ;
+    InStruct_AttrDefinition. InStruct ::= Expr9 LowerIdent MaybeDefaultVal ;
+    InStruct_InImplDecl.     InStruct ::= InImplDecl ;
+    InStruct_ImplDefinition. InStruct ::= "implement" Expr9 ":" "{" [InImplDecl] "}" ;
+
+        separator InImplDecl ";" ;
+        InImplDecl_MethodDefinition.   InImplDecl ::= "mth" LowerIdent MaybeTemplateSgn FHeader StatementBlock ;
+        InImplDecl_PropertyDefinition. InImplDecl ::= Expr9 LowerIdent ":" "{" "get" PropDefClause MaybeSetClause "}" ;
+
+separator SuperType "," ;
+SuperType_. SuperType ::= Expr9 ;
 
 MaybeSetClause_None. MaybeSetClause ::= ;
 MaybeSetClause_Some. MaybeSetClause ::= ";" "set" PropDefClause ;
 
-PropDefClause_None.     PropDefClause ::= ;
 PropDefClause_Def.      PropDefClause ::= StatementBlock ;
 PropDefClause_Auto.     PropDefClause ::= "auto" ;
--- PropDefClause_Undef.    PropDefClause ::= "undefined" ;
 
-_.  Decl2 ::= Decl7 ; -- TypeDefinition
-TypeAliasDefinition.  Decl2 ::= "type" UpperIdent Tok_Assign Expr9 ;
-Decl_Pass. Decl2 ::= "pass" ;
+FSignature_. FSignature ::= Tok_LP [ArgSignature] ")" OptResultType ;
 
-MethodDeclaration. Decl3 ::= "mth" LowerIdent MaybeTemplateSgn FnSignature ;
+    separator ArgSignature "," ;
+    ArgSignature_. ArgSignature ::= Expr9 LowerIdent ArgOptionality ;
 
-FnSignature_.  FnSignature ::= Tok_LP [FunDef_Arg] ")" OptResultType ;
+        ArgMandatory. ArgOptionality ::= ;
+        ArgOptional.  ArgOptionality ::= "?" ;
 
-separator FunDef_Arg "," ;
-FunDef_Arg_. FunDef_Arg ::= Expr9 LowerIdent MaybeDefaultVal ;
+FHeader_.  FHeader ::= Tok_LP [ArgDefinition] ")" OptResultType ;
+
+    separator ArgDefinition "," ;
+    ArgDefinition_. ArgDefinition ::= Expr9 LowerIdent MaybeDefaultVal ;
 
 OptResultType_None. OptResultType ::= ;
 OptResultType_Some. OptResultType ::= "->" Expr9;
@@ -86,8 +106,6 @@ MaybeDefaultVal_None. MaybeDefaultVal ::= ;
 MaybeDefaultVal_Some. MaybeDefaultVal ::= Tok_Assign Expr ;
 
 
-TypeDefinition_Class.        Decl7 ::= "class" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{" [VariantDefinition] [Decl10] "}" ;
-TypeDefinition_Struct.       Decl7 ::= "struct" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{" [Decl10] "}" ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
@@ -102,12 +120,6 @@ MaybeSuperclasses_Some. MaybeSuperclasses ::= "<" Expr9 ;
 MaybeSubclasses_None. MaybeSubclasses ::= ;
 MaybeSubclasses_Some. MaybeSubclasses ::= ">" Expr9 ;
 
-separator SuperType "," ;
-SuperType_. SuperType ::= Expr9 ;
-
-separator VariantDefinition "" ;
-VariantDefinition_. VariantDefinition ::= UpperIdent ":" "{" [Decl10] "}" ;
-
 
 -- -- --
 -- Statements
@@ -120,7 +132,9 @@ separator Stmt ";" ;
 
 -- Statements
 
-Stmt_Decl.          Stmt ::= Decl11 ;
+Stmt_ClassDef.      Stmt ::= ClassDefinition ;
+Stmt_StructDef.     Stmt ::= StructDefinition ;
+Stmt_AliasDef.      Stmt ::= AliasDefinition ;
 Stmt_Expr.          Stmt ::= Expr ;
 Stmt_Let.           Stmt ::= "let" LowerIdent Tok_Assign Expr ;  -- constant
 Stmt_LetTuple.      Stmt ::= "let" Tok_LP [LowerIdent] ")" Tok_Assign Expr ;  -- tuple unpacking
@@ -143,6 +157,7 @@ Stmt_Assert.        Stmt ::= Tok_Assert Expr ;
 Stmt_Print.         Stmt ::= Tok_Print ;
 Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
 Stmt_Memdump.       Stmt ::= "dumpmem" ;
+Stmt_Pass.          Stmt ::= "pass" ;
 
 separator CaseClause "" ;
 CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
@@ -158,7 +173,7 @@ separator nonempty Expr9 "," ;
 _.              Expr ::= Expr0 ;
 
 _.              Expr0 ::= Expr1 ;
-Expr_Lambda.    Expr0 ::= Tok_Fn FnSignature StatementBlock ;
+Expr_Lambda.    Expr0 ::= Tok_Fn FHeader StatementBlock ;
 
 _.              Expr1 ::= Expr2 ;
 Expr_If.        Expr1 ::= Tok_If Expr "then" Expr Tok_Else Expr ;
@@ -203,7 +218,7 @@ Expr_Minus.     Expr8 ::= "-" Expr8 ;
 _.              Expr9 ::= Expr10 ;
 Expr_Cast.      Expr9 ::= Expr10 "as" Expr10 ;
 Expr_Is.        Expr9 ::= Expr10 "is" Expr10 ;  -- isinstance
-Expr_FnType.    Expr9 ::= FnSignature ;
+Expr_FnType.    Expr9 ::= FSignature ;
 
 _.              Expr10 ::= Expr11 ;
 Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;

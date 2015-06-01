@@ -1,14 +1,12 @@
 class List():
-    Bool isNil:
-        get
+    Bool isNil
 
 struct Cons():
     Int head
     Cons tail
 
 class Tree():
-    Bool isNil:
-        get
+    Bool isNil
 
 struct Nil():
     pass

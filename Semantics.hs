@@ -442,12 +442,12 @@ hoistStmt (Stmt_Var ident _ expr) = do
     queueNextLevels 5 $ do
         cid <- deduceType expr
         hoistVar cid True ident
-hoistStmt (Stmt_Decl (TypeAliasDefinition ident _ typeExpr)) = do
+hoistStmt (Stmt_AliasDef (TypeDefinition_Alias ident _ typeExpr)) = do
     let UpperIdent (pos, aliasName) = ident
     fpos <- completePos pos
     queueAlias (fpos, aliasName, typeExpr)
 
-hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
+hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
     let (TypeDefinition_Class ident mTmplSgn _ superClsExprs variants decls) = clsDef
     let UpperIdent (pos, clsName) = ident
     beforeClasses <- asks envClasses
@@ -460,7 +460,7 @@ hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
         }
     queueNextLevels 2 $ do
         _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
-        cls <- compileClass cid ident mTmplSgn superClsExprs variants decls hoistClsDecl
+        cls <- compileClass cid ident mTmplSgn superClsExprs variants decls
         glob <- gets sstGlob
         let glob' = glob{
                 globClasses=M.insert cid cls $ globClasses glob
@@ -468,7 +468,7 @@ hoistStmt (Stmt_Decl clsDef@(TypeDefinition_Class {})) = do
         modify $ \sst -> sst{sstGlob=glob'}
         hoistingDone
 
-hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
+hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
     let (TypeDefinition_Struct ident mTmplSgn _ superStrExprs decls) = strDef
     let UpperIdent (strPos, strName) = ident
     beforeClasses <- asks envClasses
@@ -493,7 +493,8 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
             in sst{sstGlob=glob'}
     queueNextLevels 2 $ do  -- 2
         _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
-        cls <- compileClass cid ident mTmplSgn superStrExprs [] decls hoistStrClsDecl
+        clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
+        cls <- compileClass cid ident mTmplSgn superStrExprs [] clsDecls
         modify $ \sst -> let
             glob = sstGlob sst
             glob' = glob{
@@ -547,11 +548,6 @@ hoistStmt (Stmt_Decl strDef@(TypeDefinition_Struct {})) = do
                     }
                     hoistingDone
 
-hoistStmt (Stmt_Decl Decl_Pass) = hoistingDone
-
-hoistStmt (Stmt_Decl decl) = do
-    notYet $ "Hoisting for `" ++ (printTree decl) ++ "'"
-
 hoistStmt _stmt = hoistingDone
 
 
@@ -575,10 +571,10 @@ hoistVar cid mutable (LowerIdent (pos, varName)) = do
                 hoistingDone
 
 
-hoistStrAttr :: Cid -> Decl -> [(VarName, Cid)]
+hoistStrAttr :: Cid -> InStruct -> [(VarName, Cid)]
     -> TCM [(VarName, Cid)]
-hoistStrAttr _ decl@(FieldDefinition {}) attrs = do
-    let (FieldDefinition
+hoistStrAttr _ decl@(InStruct_AttrDefinition {}) attrs = do
+    let (InStruct_AttrDefinition
             typeExpr
             (LowerIdent (_pos, name))
             _maybeDefault) = decl
@@ -586,17 +582,18 @@ hoistStrAttr _ decl@(FieldDefinition {}) attrs = do
     return $ (name, cid):attrs
 hoistStrAttr _ _ attrs = return attrs
 
-hoistStrDecl :: Cid -> Decl -> (M.Map Cid Impl)
+hoistStrDecl :: Cid -> InStruct -> (M.Map Cid Impl)
     -> TCM (M.Map Cid Impl)
-hoistStrDecl _ (FieldDefinition {}) impls = return impls
-hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
-    let (MethodDeclaration
+hoistStrDecl _ (InStruct_AttrDefinition {}) impls = return impls
+hoistStrDecl ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})) impls = do
+    let (InImplDecl_MethodDefinition
             (LowerIdent (pos, name))
             mTmplSgn
-            signature) = mthDecl
+            header
+            bodyBlock) = mthDef
     fpos <- completePos pos
     assertTmplSgnEmpty mTmplSgn
-    (fnSgn, defArgs, argDefPoss) <- fnSignatureSem signature CompileDefaults
+    (fnSgn, defArgs, argDefPoss) <- fHeaderSem header CompileDefaults
 --                     outerVars <- asks envVars
     let argVars = M.insert "self" (VarType {
             varMutable=False,
@@ -613,8 +610,8 @@ hoistStrDecl ownCid (MethodDefinition mthDecl bodyBlock) impls = do
             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
             mkCall fnSgn defArgs exeBody topLevelFid args'
     addPropToImpls name pos propImpl [ownCid] impls
-hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) impls = do
-    let (PropertyDeclaration
+hoistStrDecl ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition {})) impls = do
+    let (InImplDecl_PropertyDefinition
             typeExpr
             (LowerIdent (pos, name))
             getDef
@@ -622,9 +619,6 @@ hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) impls = do
     cid <- typeExprCid typeExpr
     fpos <- completePos pos
     getter <- case getDef of
-        PropDefClause_None -> do
-            throwAt pos ("Getter declaration without " ++
-                            "definition in struct definition")
         (PropDefClause_Def bodyBlock) -> do
             let getterSgn = FunSgn {
                 mthRetType=Just cid,
@@ -645,35 +639,28 @@ hoistStrDecl ownCid propDecl@(PropertyDeclaration {}) impls = do
                 mkCall getterSgn M.empty exeBody topLevelFid [
                     (Just "self", mkExe $ \kv-> kv $ ValRef pt)]
         PropDefClause_Auto -> do
-            notYetAt pos "custom getter"
+            notYetAt pos "auto getter"
     setter <- case maybeSet of
         MaybeSetClause_None -> return $ error "Read-only property"
-        MaybeSetClause_Some PropDefClause_None -> do
-            throwAt pos ("Setter declaration without " ++
-                            "definition in struct definition")
         MaybeSetClause_Some (PropDefClause_Def _bodyBlock) -> do
             notYetAt pos "custom setter"
         MaybeSetClause_Some PropDefClause_Auto -> do
-            notYetAt pos "custom setter"
+            notYetAt pos "auto setter"
     let propImpl = PropImpl {
         propGetter=getter,
         propSetter=setter,
         propDefPos=fpos
     }
     addPropToImpls name pos propImpl [ownCid] impls
-hoistStrDecl _ (ImplementationDefinition {}) _ = do
+hoistStrDecl _ (InStruct_ImplDefinition {}) _ = do
     notYet "ImplementationDefinition"
-hoistStrDecl _ (TypeAliasDefinition {}) _ = do
+hoistStrDecl _ (InStruct_AliasDef {}) _ = do
     notYet "Nested types"
-hoistStrDecl _ (TypeDefinition_Class {}) _ = do
+hoistStrDecl _ (InStruct_ClassDef {}) _ = do
     notYet "Nested types"
-hoistStrDecl _ (TypeDefinition_Struct {}) _ = do
+hoistStrDecl _ (InStruct_StructDef {}) _ = do
     notYet "Nested types"
-hoistStrDecl _ (MethodDeclaration (LowerIdent (pos, _)) _ _) _ = do
-    throwAt pos $ (
-        "Method declaration without definition in " ++
-        "struct definition")
-hoistStrDecl _ Decl_Pass impls = return impls
+hoistStrDecl _ InStruct_Pass impls = return impls
 
 
 mkMth :: CodePosition -> (MemPt -> FunImpl) -> PropImpl
@@ -685,99 +672,76 @@ mkMth fpos mth = PropImpl {
 
 
 compileClass :: Cid -> UpperIdent -> MaybeTemplateSgn -> [SuperType] -> [VariantDefinition]
-    -> [Decl] -> HoistClsDeclFun -> TCM ClassDesc
-compileClass cid ident mTmplSgn superClsExprs variants decls hoistDecl = do
+    -> [InClass] -> TCM ClassDesc
+compileClass _cid ident mTmplSgn superClsExprs variants decls = do
     let UpperIdent (clsPos, clsName) = ident
     assertTmplSgnEmpty mTmplSgn
     _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
     when (not $ null variants) $ notYetAt clsPos "variants"
-    props <- foldl (>>=) (return M.empty) $ map (hoistDecl cid) decls
+    props <- foldl (>>=) (return M.empty) $ map hoistClsDecl decls
     let cls = ClassDesc {
             className_=clsName,
             classProps_=props
         }
     return cls
 
-type HoistClsDeclFun = Cid -> Decl -> M.Map VarName VarType
-    -> TCM (M.Map VarName VarType)
-
-hoistStrClsDecl :: HoistClsDeclFun
-hoistStrClsDecl _ (FieldDefinition {}) props = return props
-hoistStrClsDecl ownCid (MethodDefinition mthDecl _bodyBlock) props = do
-    let (MethodDeclaration ident mTmplSgn
-         (FnSignature_ lp args optResType)) = mthDecl
-        mthDecl' = (MethodDeclaration ident mTmplSgn
-                    (FnSignature_ lp (map remDef args) optResType))
-    hoistClsDecl ownCid mthDecl' props
+hoistStrClsDecl :: Cid -> InStruct -> TCM (Maybe InClass)
+hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})) = do
+    let (InImplDecl_MethodDefinition ident mTmplSgn fHeader _bodyBlock) = mthDef
+    return $ Just (InClass_MethodDeclaration ident mTmplSgn $ fHdrToFSgn fHeader)
     where
-        remDef (FunDef_Arg_ typeName name _) = do
-            FunDef_Arg_ typeName name MaybeDefaultVal_None
-hoistStrClsDecl ownCid propDecl@(PropertyDeclaration {}) props = do
-    let (PropertyDeclaration
+        fHdrToFSgn (FHeader_ lp args optResType) = do
+            let args' = flip map args $ \(ArgDefinition_ typeExpr argIdent mDefVal) -> do
+                let optionality = case mDefVal of
+                        MaybeDefaultVal_None -> ArgMandatory
+                        MaybeDefaultVal_Some {} -> ArgOptional
+                ArgSignature_ typeExpr argIdent optionality
+            FSignature_ lp args' optResType
+hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition {})) = do
+    let (InImplDecl_PropertyDefinition
             typeExpr
             (LowerIdent (pos, name))
             _getDef
             maybeSet) = propDecl
-    let maybeSet' = case maybeSet of
-            MaybeSetClause_None -> MaybeSetClause_None
-            _ -> MaybeSetClause_Some PropDefClause_None
-    hoistClsDecl ownCid (PropertyDeclaration
+    let propMutability = do
+        if maybeSet == MaybeSetClause_None
+            then PropReadOnly
+            else PropWritable
+    return $ Just (InClass_PropertyDeclaration
+            propMutability
             typeExpr
-            (LowerIdent (pos, name))
-            PropDefClause_None
-            maybeSet') props
-hoistStrClsDecl _ (ImplementationDefinition {}) props = return props
-hoistStrClsDecl _ (TypeAliasDefinition {}) _ = do
-    notYet "Nested types"
-hoistStrClsDecl _ (TypeDefinition_Class {}) _ = do
-    notYet "Nested types"
-hoistStrClsDecl _ (TypeDefinition_Struct {}) _ = do
-    notYet "Nested types"
-hoistStrClsDecl _ (MethodDeclaration {}) _ = do
-    error "MethodDeclaration in hoistStrClsDecl"  -- should have thrown before
-hoistStrClsDecl _ Decl_Pass props = return props
+            (LowerIdent (pos, name)))
+hoistStrClsDecl _ (InStruct_ImplDefinition {}) =
+    notYet "Well, w sumie to nie wiem"
+hoistStrClsDecl _ _ = return Nothing
 
-hoistClsDecl :: HoistClsDeclFun
-hoistClsDecl _ (FieldDefinition _ (LowerIdent (pos, _)) _) _ = do
-    throwAt pos "Attribute definition inside class (only structs can have attrs)"
-hoistClsDecl _ (MethodDefinition mthDecl _) _ = do
-    let MethodDeclaration (LowerIdent (pos, _)) _ _ = mthDecl
-    throwAt pos "Method definition inside class (only declarations allowed)"
-hoistClsDecl _ propDecl@(PropertyDeclaration {}) props = do
-    let (PropertyDeclaration
+hoistClsDecl :: InClass -> M.Map VarName VarType
+    -> TCM (M.Map VarName VarType)
+hoistClsDecl propDecl@(InClass_PropertyDeclaration {}) props = do
+    let (InClass_PropertyDeclaration
+            propMutability
             typeExpr
-            (LowerIdent (pos, name))
-            getDef
-            maybeSet) = propDecl
-    when (getDef /= PropDefClause_None) $ do
-        throwAt pos "Getter definition in class (only declarations allowed)"
-    mutable <- case maybeSet of
-        MaybeSetClause_None -> return False
-        MaybeSetClause_Some PropDefClause_None -> return True
-        _ -> throwAt pos "Setter definition in class (only declarations allowed)"
+            (LowerIdent (pos, name))) = propDecl
     propCid <- typeExprCid typeExpr
     fpos <- completePos pos
     let propType = VarType {
-            varMutable=mutable,
+            varMutable=propMutability == PropWritable,
             varClass=propCid,
             varDefPos=fpos
         }
     addPropToMap name pos propType props
-hoistClsDecl _ (ImplementationDefinition {}) props = return props
-hoistClsDecl _ (TypeAliasDefinition {}) _ = do
+hoistClsDecl (InClass_AliasDef {}) _ = do
     notYet "Nested types"
-hoistClsDecl _ (TypeDefinition_Class {}) _ = do
+hoistClsDecl (InClass_ClassDef {}) _ = do
     notYet "Nested types"
-hoistClsDecl _ (TypeDefinition_Struct {}) _ = do
-    notYet "Nested types"
-hoistClsDecl _ decl@(MethodDeclaration {}) props = do
-    let (MethodDeclaration
+hoistClsDecl decl@(InClass_MethodDeclaration {}) props = do
+    let (InClass_MethodDeclaration
             (LowerIdent (pos, name))
             mTmplSgn
             signature) = decl
     fpos <- completePos pos
     assertTmplSgnEmpty mTmplSgn
-    (fnSgn, _, _) <- fnSignatureSem signature RejectDefaults
+    (fnSgn, _) <- fSignatureSem signature
     propCid <- getFunctionCid fnSgn
     let propType = VarType {
             varMutable=False,
@@ -785,7 +749,7 @@ hoistClsDecl _ decl@(MethodDeclaration {}) props = do
             varDefPos=fpos
         }
     addPropToMap name pos propType props
-hoistClsDecl _ Decl_Pass props = return props
+hoistClsDecl InClass_Pass props = return props
 
 addPropToImpls :: VarName -> (Int, Int) -> PropImpl -> [Cid] -> M.Map Cid Impl
     -> TCM (M.Map Cid Impl)
@@ -818,7 +782,10 @@ addPropToMap name pos propImpl propMap = do
 
 
 stmtSem :: Stmt -> TCM (Exe ())
-stmtSem (Stmt_Decl _) = return noop
+stmtSem (Stmt_ClassDef _) = return noop
+stmtSem (Stmt_StructDef _) = return noop
+stmtSem (Stmt_AliasDef _) = return noop
+stmtSem Stmt_Pass = return noop
 
 stmtSem (Stmt_Expr expr) = do
     esem <- exprSem expr
@@ -1000,8 +967,8 @@ typeExprSem (Expr_TypeName (UpperIdent (pos, typeName))) = do
             return $ StrExpr sid cid
         Nothing -> do
             return $ ClsExpr cid
-typeExprSem (Expr_FnType sgnExpr@(FnSignature_ _ _ _)) = do
-    (fnSgn, _, _) <- fnSignatureSem sgnExpr RejectDefaults
+typeExprSem (Expr_FnType sgnExpr@(FSignature_ _ _ _)) = do
+    (fnSgn, _) <- fSignatureSem sgnExpr
     cid <- getFunctionCid fnSgn
     return $ ClsExpr cid
 typeExprSem (Expr_TmplAppl _ (Tok_LTP (pos, _)) _) = do
@@ -1045,7 +1012,7 @@ deduceType (Expr_Mod {}) = return (stdClss M.! "Int")
 deduceType (Expr_Minus expr) = deduceType expr
 
 deduceType (Expr_Lambda _ signature _) = do
-    (fnSgn, _, _) <- fnSignatureSem signature AcceptDefaults
+    (fnSgn, _, _) <- fHeaderSem signature AcceptDefaults
     getFunctionCid fnSgn
 
 deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
@@ -1186,7 +1153,7 @@ exprSem (Expr_Minus expr) = do
             ke (ValInt $ 0 - val) re mem
 
 exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
-    (fnSgn, defArgs, argDefPoss) <- fnSignatureSem signature CompileDefaults
+    (fnSgn, defArgs, argDefPoss) <- fHeaderSem signature CompileDefaults
     vars <- asks envVars
     let makeInEnv outEnv = outEnv{
             envVars=M.union vars (argsToVars (mthArgs fnSgn) argDefPoss),
@@ -1314,13 +1281,12 @@ exprSem expr = notYet $ printTree expr
 --                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
-data DefaultsHandling = RejectDefaults
-                      | AcceptDefaults
+data DefaultsHandling = AcceptDefaults
                       | CompileDefaults
 
-fnSignatureSem :: FnSignature -> DefaultsHandling
+fHeaderSem :: FHeader -> DefaultsHandling
     -> TCM (FunSgn, M.Map VarName (Exe VarVal), M.Map VarName CodePosition)
-fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
+fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
     argTuples <- mapM argSem args
     retType <- case optResType of
         OptResultType_None -> return Nothing
@@ -1331,11 +1297,12 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
         mthArgs=(map (\(a, _, _) -> a) argTuples)
     }
     let defArgsMap = foldl argToMap M.empty argTuples
-    let argDefPosMap = foldl argToDefPosMap M.empty argTuples
+    let argDefPosMap = M.fromList $ flip mapMaybe argTuples $ \(as, _, dp) -> do
+        (argName as) >>= (\n -> Just (n, dp))
     return (funSgn, defArgsMap, argDefPosMap)
     where
-        argSem :: FunDef_Arg -> TCM (ArgSgn, Maybe (Exe VarVal), CodePosition)
-        argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, "_")) defVal) = do
+        argSem :: ArgDefinition -> TCM (ArgSgn, Maybe (Exe VarVal), CodePosition)
+        argSem (ArgDefinition_ typeExpr (LowerIdent (pos, "_")) defVal) = do
             fpos <- completePos pos
             case defVal of
                 MaybeDefaultVal_Some _ _ -> do
@@ -1349,7 +1316,7 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
                 argType=cid,
                 argHasDefault=False
             }, Nothing, fpos)
-        argSem (FunDef_Arg_ typeExpr (LowerIdent (pos, name)) defVal) = do
+        argSem (ArgDefinition_ typeExpr (LowerIdent (pos, name)) defVal) = do
             argCid <- typeExprCid typeExpr
             fpos <- completePos pos
             (hasDef, defExe) <- case defVal of
@@ -1366,9 +1333,6 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
                             when ((expCid defSem) /= argCid) $ do
                                 typeMismatch argCid (expCid defSem) pos
                             return (True, Just $ expRValue defSem)
-                        RejectDefaults -> do
-                            throwAt pos ("Default argument value " ++
-                                        "specification is not allowed here")
             return $ (ArgSgn {
                 argName=Just name,
                 argType=argCid,
@@ -1377,8 +1341,31 @@ fnSignatureSem (FnSignature_ _ args optResType) defaultsHandling = do
         argToMap m (_, Nothing, _) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe, _) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
-        argToDefPosMap m (ArgSgn{argName=Nothing}, _, _dp) = m
-        argToDefPosMap m (ArgSgn{argName=Just name}, _, dp) = M.insert name dp m
+
+fSignatureSem :: FSignature -> TCM (FunSgn, M.Map VarName CodePosition)
+fSignatureSem (FSignature_ _ args optResType) = do
+    argTuples <- mapM argSem args
+    retType <- case optResType of
+        OptResultType_None -> return Nothing
+        OptResultType_Some typeExpr -> do
+            liftM Just $ typeExprCid typeExpr
+    let funSgn = FunSgn {
+        mthRetType=retType,
+        mthArgs=(map fst argTuples)
+    }
+    let argDefPosMap = M.fromList $ flip mapMaybe argTuples $ \(as, dp) -> do
+        (argName as) >>= (\n -> Just (n, dp))
+    return (funSgn, argDefPosMap)
+    where
+        argSem :: ArgSignature -> TCM (ArgSgn, CodePosition)
+        argSem (ArgSignature_ typeExpr (LowerIdent (pos, name)) isOpt) = do
+            argCid <- typeExprCid typeExpr
+            fpos <- completePos pos
+            return $ (ArgSgn {
+                argName=if name == "_" then Nothing else Just name,
+                argType=argCid,
+                argHasDefault=isOpt == ArgOptional
+            }, fpos)
 
 
 argsToVars :: [ArgSgn] -> M.Map VarName CodePosition -> M.Map VarName VarType
