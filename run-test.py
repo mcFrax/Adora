@@ -1,10 +1,12 @@
 #!/usr/bin/python
 
+import os
 import sys
 import subprocess
 
 devnull = open('/dev/null')
 verbose = False
+testbuild = os.path.isfile('./testbuild')
 
 class Failure(Exception):
     pass
@@ -50,7 +52,10 @@ def runTest(filename):
     expectedOut = ''.join(expectations[exOut] or [])
     expectedErr = ''.join((expectations[exCmpErr] or []) or (expectations[exRunErr] or []))
 
-    test = subprocess.Popen(['./interpreter', filename], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    cmd = ['./interpreter', filename]
+    if testbuild:
+        cmd += ['+RTS', '-xc']
+    test = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (out, errout) = test.communicate(input=''.join(expectations[exIn] or []))
     test.wait()
     try:

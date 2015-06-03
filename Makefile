@@ -11,7 +11,7 @@ TestBuild :=
 TestBuildMarker := ./testbuild
 OptBuildMarker := ./optbuild
 BuildMarker := $(if $(TestBuild),$(TestBuildMarker),$(OptBuildMarker))
-CommonGHCFlags := -cpp $(if $(TestBuild),-fhpc -prof,-O2) -DUSE_HASKELINE
+CommonGHCFlags := -cpp $(if $(TestBuild),-g -fhpc -prof -auto-all -caf-all,-O2) -DUSE_HASKELINE
 
 all: Testadora interpreter
 

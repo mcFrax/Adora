@@ -9,6 +9,7 @@ import Control.Monad.State.Class
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
+import qualified Debug.Trace
 
 import System.IO
 
@@ -18,6 +19,12 @@ import Printadora(printTree)
 import Memory
 import Types
 import StdLib
+
+
+trace :: Show a => String -> a -> b -> b
+trace pref trac val = Debug.Trace.trace (pref ++ (show trac)) val
+
+#define TRACE(x) (trace (__FILE__ ++ ":" ++ (show (__LINE__ :: Int))) (x) $ seq (x) $ return ())
 
 
 data SemState = SemState {
@@ -385,14 +392,6 @@ hoisted stmts innerSem = do
                 Left err@(Err _ (ErrUndefinedType name) _) -> return $ Left (name, err)
                 Left err -> throwError err
 
---         resolveMros sids = do
---             resolveMros' $ S.fromList sids
---             structs <- gets $ globStructs.sstGlob
---             structs' <-
---             modifyGlob $ \glob -> do
---                 glob{
---                     globStructs=structs'
---                 }
         resolveMros sids = do
             _ <- resolveMros' sids S.empty sids
             return ()
@@ -444,7 +443,6 @@ hoisted stmts innerSem = do
                 [] -> do
                     throwError $ ErrSomewhere (
                         "Unable to resolve inheritance: MRO confict")
-
 
 -- queueNextLevel, queueNextLevels, queueAlias i hoistingDone są mechanizmem
 -- kolejkowania kolejnych etapów hoistingu. Dzieki takiemu rozwiązaniu, kod
@@ -586,7 +584,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     liftM Just $ typeExprCid impClsExpr
                 _ -> return Nothing
         let directSuperClsss = S.fromList $ superStrClss ++ implClss
-        -- TODO verify inheritance correctness - eliminate doubles, cycles and illegal implementation of non-derived struct classes
+        -- TODO verify inheritance correctness - eliminate implementic struct classes without deriving from them
         clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
         cls <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
         updateCls cls
@@ -604,7 +602,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     structDirectSupers=directSuperStrs,
                     structMRO=error "Undefined structMRO",
                     structOwnAttrs=attrsMap,
-                    structAttrs=attrsMap,--error "Undefined structAttrs",
+                    structAttrs=error "Undefined structAttrs",
                     structClasses=error "Undefined structClasses",
                     structCtor=error "Undefined structCtor",
                     structCtorSgn=error "Undefined structCtorSgn"
@@ -612,8 +610,19 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
             updateDesc structStub
             q1 <- queueStruct sid
             q2 <- queueNextLevels 2 $ do  -- 5
-                let struct = structStub {
+                structStub' <- gets $ (!!! sid).globStructs.sstGlob
+                let mergeAttrs acc [] = return acc
+                    mergeAttrs acc (sid':sids) = do
+                        attrs' <- gets $ structOwnAttrs.(!!! sid').globStructs.sstGlob
+                        let acc' = M.union acc attrs'
+                        if (M.size acc') == ((M.size acc) + (M.size attrs')) then do
+                            mergeAttrs acc' sids
+                        else do
+                            throwAt strPos "Conflicting attrs"
+                mergedAttrsMap <- mergeAttrs M.empty $ structMRO structStub'
+                let struct = structStub' {
                         structCtor=FunImpl ctorSgn constructor,
+                        structAttrs=mergedAttrsMap,
                         structCtorSgn=ctorSgn
                     }
                     constructor argTuples = do
