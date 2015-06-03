@@ -1,13 +1,13 @@
 # konflikt properties pomiędzy structami bazowymi
 
 struct Base1:
-    Int prop
+    Int attr
 
 struct Base2:
-    Bool prop
+    Bool attr
 
 struct Derived(Base1, Base2):
     pass
 
 # EXPECTED COMPILATION ERROR #
-# konflikt properties pomiędzy structami bazowymi
+# bad/inheritance10.adora:9:8: error: Conflicting attribute definitions for `attr'

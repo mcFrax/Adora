@@ -623,7 +623,9 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                         if (M.size acc') == ((M.size acc) + (M.size attrs')) then do
                             mergeAttrs acc' sids
                         else do
-                            throwAt strPos "Conflicting attrs"
+                            let (conflicted, _) = M.findMin $ M.intersection acc attrs'
+                            throwAt strPos (
+                                "Conflicting attribute definitions for `" ++ conflicted ++ "'")
                 mergedAttrsMap <- mergeAttrs M.empty $ structMRO structStub'
                 let struct = structStub' {
                         structCtor=FunImpl ctorSgn constructor,
