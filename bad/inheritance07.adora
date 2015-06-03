@@ -11,4 +11,4 @@ struct Struct:
             # no setter
 
 # EXPECTED COMPILATION ERROR #
-# ???
+# brak settera w implementacji nadpisywalnej property

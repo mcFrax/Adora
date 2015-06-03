@@ -531,7 +531,12 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
                 globClasses=M.insert cid newDesc $ globClasses glob
             }
     queueNextLevels 2 $ do
-        superClses <- mapM (\(SuperType_ t) -> typeExprCid t) superClsExprs
+        superClses <- forM superClsExprs $ \(SuperType_ t) -> do
+            sem <- typeExprSem t
+            case sem of
+                ClsExpr superCid -> return superCid
+                StrExpr {} -> throwAt pos $ (
+                    "`" ++ (printTree t) ++ "' is struct, abstract class expected")
         let directSupers = S.fromList superClses
         cls <- compileClass cid ident mTmplSgn directSupers variants decls
         updateDesc cls

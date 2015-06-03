@@ -1,0 +1,13 @@
+# konflikt properties pomiędzy structami bazowymi
+
+struct Base1:
+    Int prop
+
+struct Base2:
+    Bool prop
+
+struct Derived(Base1, Base2):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# konflikt properties pomiędzy structami bazowymi

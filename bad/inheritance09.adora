@@ -1,0 +1,13 @@
+# konflikt properties pomiędzy klasami bazowymi
+
+class Base1:
+    Int prop
+
+class Base2:
+    Bool prop
+
+class Derived(Base1, Base2):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# konflikt properties pomiędzy klasami bazowymi

@@ -7,4 +7,4 @@ class Class(Struct):
     pass
 
 # EXPECTED COMPILATION ERROR #
-# ???
+# bad/inheritance03.adora:6:7: error: `Struct' is struct, abstract class expected
