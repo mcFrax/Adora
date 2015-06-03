@@ -3,6 +3,7 @@ module Types where
 import Control.DeepSeq
 import Control.Exception
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import System.Exit(exitWith, ExitCode(..))
 import System.IO
 
@@ -53,7 +54,9 @@ data RunEnv = RunEnv {
 
 data ClassDesc = ClassDesc {
     className_ :: String,
-    classProps_ :: M.Map VarName VarType
+    classProps_ :: M.Map VarName VarType,
+    classDirectSupers :: S.Set Cid,
+    classAllSupers :: S.Set Cid
 } | ClassFun FunSgn
     deriving Show
 
@@ -80,6 +83,9 @@ data ArgSgn = ArgSgn {
 data StructDesc = StructDesc {
     structName :: VarName,
     structCid :: Cid,
+    structDirectSupers :: [Sid],
+    structMRO :: [Sid],
+    structOwnAttrs :: M.Map VarName Cid,
     structAttrs :: M.Map VarName Cid,
     structClasses :: M.Map Cid Impl,
     structCtor :: FunImpl,

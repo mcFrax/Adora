@@ -14,6 +14,7 @@ layout ":" ;
 -- Lexer - tokens
 
 separator LowerIdent "," ;
+position token Tok_As 'a''s' ;
 position token Tok_Assert 'a''s''s''e''r''t' ;
 position token Tok_Break 'b''r''e''a''k' ;
 position token Tok_Continue 'c''o''n''t''i''n''u''e' ;
@@ -40,7 +41,7 @@ position token DollarIdent ('$' letter (letter | digit | '_')*) ;
 TypeDefinition_Alias.        AliasDefinition ::= "type" UpperIdent Tok_Assign Expr9 ;
 
 TypeDefinition_Class.        ClassDefinition ::=
-        "class" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{"
+        "class" UpperIdent MaybeTemplateSgn MaybeSupers ":" "{"
             [VariantDefinition]
             [InClass]
         "}" ;
@@ -60,31 +61,34 @@ TypeDefinition_Class.        ClassDefinition ::=
     PropWritable.   PropMutability ::= "writable" ;
 
 TypeDefinition_Struct.       StructDefinition ::=
-        "struct" UpperIdent MaybeTemplateSgn Tok_LP [SuperType] ")" ":" "{"
+        "struct" UpperIdent MaybeTemplateSgn MaybeSupers  ":" "{"
             [InStruct]
         "}" ;
 
     separator InStruct ";" ;
-    InStruct_Pass.           InStruct ::= "pass" ;
     InStruct_AliasDef.       InStruct ::= AliasDefinition ;
     InStruct_ClassDef.       InStruct ::= ClassDefinition ;
     InStruct_StructDef.      InStruct ::= StructDefinition ;
     InStruct_AttrDefinition. InStruct ::= Expr9 LowerIdent MaybeDefaultVal ;
-    InStruct_InImplDecl.     InStruct ::= InImplDecl ;
-    InStruct_ImplDefinition. InStruct ::= "implement" Expr9 ":" "{" [InImplDecl] "}" ;
+    InStruct_InImplDecl.     InStruct ::= InImpl ;
+    InStruct_ImplDefinition. InStruct ::= "implement" Expr9 ":" "{" [InImpl] "}" ;
 
-        separator InImplDecl ";" ;
-        InImplDecl_MethodDefinition.   InImplDecl ::= "mth" LowerIdent MaybeTemplateSgn FHeader StatementBlock ;
-        InImplDecl_PropertyDefinition. InImplDecl ::= Expr9 LowerIdent ":" "{" "get" PropDefClause MaybeSetClause "}" ;
+        separator InImpl ";" ;
+        InImpl_Pass.               InImpl ::= "pass" ;
+        InImpl_MethodDefinition.   InImpl ::= "mth" LowerIdent MaybeTemplateSgn FHeader StatementBlock ;
+        InImpl_PropertyDefinition. InImpl ::= Expr9 LowerIdent ":" "{" "get" PropDefClause MaybeSetClause "}" ;
 
-separator SuperType "," ;
-SuperType_. SuperType ::= Expr9 ;
+            MaybeSetClause_None. MaybeSetClause ::= ;
+            MaybeSetClause_Some. MaybeSetClause ::= ";" "set" PropDefClause ;
 
-MaybeSetClause_None. MaybeSetClause ::= ;
-MaybeSetClause_Some. MaybeSetClause ::= ";" "set" PropDefClause ;
+            PropDefClause_Def.      PropDefClause ::= StatementBlock ;
+            PropDefClause_Auto.     PropDefClause ::= "auto" ;
 
-PropDefClause_Def.      PropDefClause ::= StatementBlock ;
-PropDefClause_Auto.     PropDefClause ::= "auto" ;
+MaybeSupers_None. MaybeSupers ::= ;
+MaybeSupers_Some. MaybeSupers ::= Tok_LP [SuperType] ")" ;
+
+    separator SuperType "," ;
+    SuperType_. SuperType ::= Expr9 ;
 
 FSignature_. FSignature ::= Tok_LP [ArgSignature] ")" OptResultType ;
 
@@ -216,7 +220,7 @@ Expr_Minus.     Expr8 ::= "-" Expr8 ;
 -- Expr_Plus.      Expr8 ::= "+" Expr8 ;
 
 _.              Expr9 ::= Expr10 ;
-Expr_Cast.      Expr9 ::= Expr10 "as" Expr10 ;
+Expr_As.      Expr9 ::= Expr10 Tok_As Expr10 ;
 Expr_Is.        Expr9 ::= Expr10 "is" Expr10 ;  -- isinstance
 Expr_FnType.    Expr9 ::= FSignature ;
 

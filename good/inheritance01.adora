@@ -1,0 +1,18 @@
+class Base():
+    writable Int wr
+    Int ro
+
+struct Impl():
+    Int wr_
+    Int wr:
+        get:
+            return self.[wr_]
+        #set:
+            #assert value > 0
+            #self.[wr_] = value
+
+    implement Base:
+        pass
+
+fn () -> Base:
+    return Impl() as Base

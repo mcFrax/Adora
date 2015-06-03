@@ -85,6 +85,9 @@ instance MonadReader LocEnv TCM where
         (st', _, res) <- run st (f env)
         return (st', env, res)
 
+modifyGlob :: (GlobEnv -> GlobEnv) -> TCM ()
+modifyGlob f = modify $ \sst -> sst{sstGlob=f $ sstGlob sst}
+
 -- environment modifications (tampering with Reader part):
 
 setEnv :: LocEnv -> TCM ()
@@ -154,7 +157,9 @@ stdGlobClss = do
     where
         f (name, cid) = (cid, ClassDesc {
             className_=name,
-            classProps_=M.empty
+            classProps_=M.empty,
+            classDirectSupers=S.empty,
+            classAllSupers=S.empty
         })
 
 topLevelFid :: Fid
@@ -288,20 +293,25 @@ stmtSeqSem stmts = do
 
 type AliasSpec = (CodePosition, VarName, Expr)
 
-data HoistingLevel = HoistingMore [AliasSpec] (TCM HoistingLevel)
-                   | HoistingEnd [AliasSpec]
+type HoistingExtras = ([AliasSpec], S.Set Sid)
+
+data HoistingLevel = HoistingMore HoistingExtras (TCM HoistingLevel)
+                   | HoistingEnd HoistingExtras
 
 hoisted :: [Stmt] -> TCM (Exe a) -> TCM (Exe a)
 hoisted stmts innerSem = do
-    level1 <- (foldl (>>=) (return $ HoistingEnd [])) =<< (mapM hoistStmt stmts)
+    level1 <- (foldl (>>=) (return $ HoistingEnd ([], S.empty))) =<< (mapM hoistStmt stmts)
     hoist level1
     innerSem
     where
-        hoist (HoistingMore aliases nextLevel) = do
+        hoist (HoistingMore (aliases, sids) nextLevel) = do
             makeAliases aliases
+            resolveMros sids
             nextLevel' <- nextLevel
             hoist nextLevel'
-        hoist (HoistingEnd aliases) = makeAliases aliases
+        hoist (HoistingEnd (aliases, sids)) = do
+            makeAliases aliases
+            resolveMros sids
         makeAliases [] = return ()
         makeAliases aliases = do
             let aliases' = flip map aliases $ \(fpos, name, expr) -> do
@@ -375,6 +385,80 @@ hoisted stmts innerSem = do
                 Left err@(Err _ (ErrUndefinedType name) _) -> return $ Left (name, err)
                 Left err -> throwError err
 
+--         resolveMros sids = do
+--             resolveMros' $ S.fromList sids
+--             structs <- gets $ globStructs.sstGlob
+--             structs' <-
+--             modifyGlob $ \glob -> do
+--                 glob{
+--                     globStructs=structs'
+--                 }
+        resolveMros sids = do
+            _ <- resolveMros' sids S.empty sids
+            return ()
+
+        resolveMros' sids stack unresolved = do
+            if S.null sids then do
+                return unresolved
+            else do
+                let (sid, sids') = S.deleteFindMin sids
+                unresolved' <- do
+                    if S.member sid unresolved then do
+                        resolveMro sid stack unresolved
+                    else do
+                        return unresolved
+                resolveMros' (S.intersection sids' unresolved') stack unresolved'
+
+        resolveMro sid stack unresolved = do
+            when (S.member sid stack) $ do
+                throwError $ ErrSomewhere (
+                    "Unable to resolve inheritance: dependency cycle")
+            struct <- gets $ (!!! sid).globStructs.sstGlob
+            let directs = structDirectSupers struct
+            unresolved' <- resolveMros' (S.fromList directs) (S.insert sid stack) unresolved
+            directsMros <- forM directs $ \direct -> do
+                gets $ structMRO.(!!! direct).globStructs.sstGlob
+            mro <- merge [sid] directsMros
+            modifyGlob $ \glob -> do
+                glob{
+                    globStructs=M.insert sid struct{
+                            structMRO=mro
+                        } $ globStructs glob
+                }
+            return $ S.delete sid unresolved'
+        merge acc [] = return $ reverse acc
+        merge acc mros = do
+            let heads = map head mros
+                tails = concat $ map tail mros
+                candidates = filter (`notElem` tails) heads
+            case candidates of
+                sid:_ -> do
+                    let mros' = flip mapMaybe mros $ \mro -> do
+                        case mro of
+                            [] -> Nothing
+                            m@[sid'] -> do
+                                if sid' == sid then Nothing else Just m
+                            m@(sid':sids) -> do
+                                if sid' == sid then Just sids else Just m
+                    merge (sid:acc) mros'
+                [] -> do
+                    throwError $ ErrSomewhere (
+                        "Unable to resolve inheritance: MRO confict")
+
+
+-- queueNextLevel, queueNextLevels, queueAlias i hoistingDone są mechanizmem
+-- kolejkowania kolejnych etapów hoistingu. Dzieki takiemu rozwiązaniu, kod
+-- hoistingu każdego rodzaju deklaracji jest spójną sekwencją, mimo, że jego
+-- wykonanie jest kilkukrotnie przeplatane z wykonaniem akcji dla innych
+-- deklaracji.
+
+-- Jako, że rozwiązanie aliasów musi nastąpić na konkretnym etapie, a wymaga
+-- obróbki wszystkich zdefiniowanych aliasów jednocześnie, queueAlias umożliwia
+-- zbieranie zbioru aliasów w celu wspólnej obsługi. Rozwiązanie można
+-- łatwo rozszerzyć na zbieranie innego typu zadań na dowolnym etapie.
+
+-- EDIT: Doszedł queueStruct, robiący coś podobnego dla rozwiązywania
+-- dziedziczenia, i możliwe, że będzie jeszcze coś podobnego dla klas.
 
 queueNextLevel :: TCM (HoistingLevel -> TCM HoistingLevel)
     -> TCM (HoistingLevel -> TCM HoistingLevel)
@@ -382,11 +466,11 @@ queueNextLevel nextLevel = do
     return $ \hoistingAcc -> do
         nextLevel' <- nextLevel
         case hoistingAcc of
-            HoistingMore aliases hoistingAcc' -> do
-                return $ HoistingMore aliases $ do
+            HoistingMore extras hoistingAcc' -> do
+                return $ HoistingMore extras $ do
                     hoistingAcc' >>= nextLevel'
-            HoistingEnd aliases -> do
-                return $ HoistingMore aliases $ nextLevel' $ HoistingEnd []
+            HoistingEnd extras -> do
+                return $ HoistingMore extras $ nextLevel' $ HoistingEnd ([], S.empty)
 
 queueNextLevels :: Integer -> TCM (HoistingLevel -> TCM HoistingLevel)
     -> TCM (HoistingLevel -> TCM HoistingLevel)
@@ -398,10 +482,19 @@ queueAlias :: AliasSpec -> TCM (HoistingLevel -> TCM HoistingLevel)
 queueAlias alias = do
     return $ \hoistingAcc -> do
         case hoistingAcc of
-            HoistingMore aliases hoistingAcc' -> do
-                return $ HoistingMore (alias:aliases) hoistingAcc'
-            HoistingEnd aliases -> do
-                return $ HoistingEnd (alias:aliases)
+            HoistingMore (aliases, sids) hoistingAcc' -> do
+                return $ HoistingMore (alias:aliases, sids) hoistingAcc'
+            HoistingEnd (aliases, sids) -> do
+                return $ HoistingEnd (alias:aliases, sids)
+
+queueStruct :: Sid -> TCM (HoistingLevel -> TCM HoistingLevel)
+queueStruct sid = do
+    return $ \hoistingAcc -> do
+        case hoistingAcc of
+            HoistingMore (aliases, sids) hoistingAcc' -> do
+                return $ HoistingMore (aliases, S.insert sid sids) hoistingAcc'
+            HoistingEnd (aliases, sids) -> do
+                return $ HoistingEnd (aliases, S.insert sid sids)
 
 hoistingDone :: TCM (HoistingLevel -> TCM HoistingLevel)
 hoistingDone = return $ return
@@ -423,8 +516,9 @@ hoistStmt (Stmt_AliasDef (TypeDefinition_Alias ident _ typeExpr)) = do
     queueAlias (fpos, aliasName, typeExpr)
 
 hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
-    let (TypeDefinition_Class ident mTmplSgn _ superClsExprs variants decls) = clsDef
+    let (TypeDefinition_Class ident mTmplSgn maybeSupers variants decls) = clsDef
     let UpperIdent (pos, clsName) = ident
+    let superClsExprs = extractMaybeSupers maybeSupers
     beforeClasses <- asks envClasses
     when (clsName `M.member` beforeClasses) $
         throwAt pos ("Class `" ++ clsName ++ "' already defined")
@@ -433,19 +527,27 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
-    queueNextLevels 2 $ do
-        _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
-        cls <- compileClass cid ident mTmplSgn superClsExprs variants decls
-        glob <- gets sstGlob
-        let glob' = glob{
-                globClasses=M.insert cid cls $ globClasses glob
+    let updateDesc newDesc = do
+        modifyGlob $ \glob -> do
+            glob{
+                globClasses=M.insert cid newDesc $ globClasses glob
             }
-        modify $ \sst -> sst{sstGlob=glob'}
-        hoistingDone
+    queueNextLevels 2 $ do
+        superClses <- mapM (\(SuperType_ t) -> typeExprCid t) superClsExprs
+        let directSupers = S.fromList superClses
+        cls <- compileClass cid ident mTmplSgn directSupers variants decls
+        updateDesc cls
+        queueNextLevel $ do
+            allSupers <- closeSuperClss directSupers
+            updateDesc cls{
+                classAllSupers=allSupers
+            }
+            hoistingDone
 
 hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
-    let (TypeDefinition_Struct ident mTmplSgn _ superStrExprs decls) = strDef
+    let (TypeDefinition_Struct ident mTmplSgn maybeSupers decls) = strDef
     let UpperIdent (strPos, strName) = ident
+    let superStrExprs = extractMaybeSupers maybeSupers
     beforeClasses <- asks envClasses
     beforeStructs <- asks envStructs
     when (strName `M.member` beforeClasses) $
@@ -460,37 +562,56 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
             envClasses=M.insert strName cid beforeClasses
         }
     let updateDesc newDesc = do
-        modify $ \sst -> let
-            glob = sstGlob sst
-            glob' = glob{
+            modifyGlob $ \glob -> do
+                glob{
                     globStructs=M.insert sid newDesc $ globStructs glob
                 }
-            in sst{sstGlob=glob'}
-    queueNextLevels 2 $ do  -- 2
-        _superStrs <- mapM (\(SuperType_ t) -> typeExprSem t) superStrExprs
-        clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
-        cls <- compileClass cid ident mTmplSgn superStrExprs [] clsDecls
-        modify $ \sst -> let
-            glob = sstGlob sst
-            glob' = glob{
-                    globClasses=M.insert cid cls $ globClasses glob
+        updateCls newDesc = do
+            modifyGlob $ \glob -> do
+                glob{
+                    globClasses=M.insert cid newDesc $ globClasses glob
                 }
-            in sst{sstGlob=glob'}
+    queueNextLevels 2 $ do  -- 2
+        superStrs <- forM superStrExprs $ \(SuperType_ t) -> do
+            typeSem <- typeExprSem t
+            case typeSem of
+                StrExpr {} -> return typeSem
+                ClsExpr {} -> throwAt strPos $ (
+                    "`" ++ (printTree t) ++ "' is abstract class, struct expected")
+        let directSuperStrs = map typeSid superStrs
+        let superStrClss = map typeCid superStrs
+        implClss <- liftM catMaybes $ forM decls $ \decl -> do
+            case decl of
+                InStruct_ImplDefinition impClsExpr _implDecls -> do
+                    liftM Just $ typeExprCid impClsExpr
+                _ -> return Nothing
+        let directSuperClsss = S.fromList $ superStrClss ++ implClss
+        -- TODO verify inheritance correctness - eliminate doubles, cycles and illegal implementation of non-derived struct classes
+        clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
+        cls <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
+        updateCls cls
         queueNextLevel $ do  -- 3
-            let initImpls = M.fromList [(cid, M.empty)]
+            allSuperClss <- closeSuperClss directSuperClsss
+            updateCls cls{
+                classAllSupers=allSuperClss
+            }
             revAttrs <- foldl (>>=) (return []) $ map (hoistStrAttr cid) decls
             let attrs = reverse revAttrs
                 attrsMap = M.fromList attrs
                 structStub = StructDesc {
                     structName=strName,
                     structCid=cid,
-                    structAttrs=attrsMap,
+                    structDirectSupers=directSuperStrs,
+                    structMRO=error "Undefined structMRO",
+                    structOwnAttrs=attrsMap,
+                    structAttrs=attrsMap,--error "Undefined structAttrs",
                     structClasses=error "Undefined structClasses",
                     structCtor=error "Undefined structCtor",
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
             updateDesc structStub
-            queueNextLevels 2 $ do  -- 5
+            q1 <- queueStruct sid
+            q2 <- queueNextLevels 2 $ do  -- 5
                 let struct = structStub {
                         structCtor=FunImpl ctorSgn constructor,
                         structCtorSgn=ctorSgn
@@ -517,13 +638,24 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                         in (reReturn re) (ValRef pt) re mem'
                 updateDesc struct
                 queueNextLevel $ do -- 6
-                    impls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
+                    let initImpls = S.fold insertEmpty M.empty $ S.insert cid allSuperClss
+                        insertEmpty iCid m = M.insert iCid M.empty m
+                    directImpls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
+                    impls <- completeImpls directImpls cid $ map typeSid superStrs
                     updateDesc struct {
                         structClasses=impls
                     }
                     hoistingDone
-
+            return $ q1 >=> q2
 hoistStmt _stmt = hoistingDone
+
+
+extractMaybeSupers :: MaybeSupers -> [SuperType]
+extractMaybeSupers MaybeSupers_None = []
+extractMaybeSupers (MaybeSupers_Some _ supers) = supers
+
+completeImpls :: M.Map Cid Impl -> Cid -> [Sid] -> TCM (M.Map Cid Impl)
+completeImpls impls _ownCid _superSids = return impls
 
 
 hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingLevel -> TCM HoistingLevel)
@@ -559,11 +691,24 @@ hoistStrAttr _ decl@(InStruct_AttrDefinition {}) attrs = do
     return $ (name, cid):attrs
 hoistStrAttr _ _ attrs = return attrs
 
-hoistStrDecl :: Cid -> InStruct -> (M.Map Cid Impl)
-    -> TCM (M.Map Cid Impl)
+hoistStrDecl :: Cid -> InStruct -> (M.Map Cid Impl) -> TCM (M.Map Cid Impl)
 hoistStrDecl _ (InStruct_AttrDefinition {}) impls = return impls
-hoistStrDecl ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})) impls = do
-    let (InImplDecl_MethodDefinition
+hoistStrDecl ownCid (InStruct_InImplDecl inImpl) impls = do
+    hoistImplDecl ownCid inImpl impls
+hoistStrDecl _ (InStruct_ImplDefinition clsName inImpls) impls = do
+    implCid <- typeExprCid clsName
+    foldl (>>=) (return impls) $ map (hoistImplDecl implCid) inImpls
+hoistStrDecl _ (InStruct_AliasDef {}) _ = do
+    notYet "Nested types"
+hoistStrDecl _ (InStruct_ClassDef {}) _ = do
+    notYet "Nested types"
+hoistStrDecl _ (InStruct_StructDef {}) _ = do
+    notYet "Nested types"
+
+hoistImplDecl :: Cid -> InImpl -> (M.Map Cid Impl) -> TCM (M.Map Cid Impl)
+hoistImplDecl _ InImpl_Pass impls = return impls
+hoistImplDecl implCid mthDef@(InImpl_MethodDefinition {}) impls = do
+    let (InImpl_MethodDefinition
             (LowerIdent (pos, name))
             mTmplSgn
             header
@@ -574,7 +719,7 @@ hoistStrDecl ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})
 --                     outerVars <- asks envVars
     let argVars = M.insert "self" (VarType {
             varMutable=False,
-            varClass=ownCid,
+            varClass=implCid,
             varDefPos=fpos
         }) $ argsToVars (mthArgs fnSgn) argDefPoss
     let makeInEnv outEnv = outEnv{
@@ -586,9 +731,9 @@ hoistStrDecl ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})
     let propImpl = mkMth fpos $ \pt -> FunImpl fnSgn $ \args -> do
             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
             mkCall fnSgn defArgs exeBody topLevelFid args'
-    addPropToImpls name pos propImpl [ownCid] impls
-hoistStrDecl ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition {})) impls = do
-    let (InImplDecl_PropertyDefinition
+    addPropToImpls name pos propImpl [implCid] impls
+hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
+    let (InImpl_PropertyDefinition
             typeExpr
             (LowerIdent (pos, name))
             getDef
@@ -605,7 +750,7 @@ hoistStrDecl ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition
             let makeInEnv outEnv = outEnv{
                     envVars=M.fromList [("self", VarType {
                         varMutable=False,
-                        varClass=ownCid,
+                        varClass=implCid,
                         varDefPos=fpos
                     })], -- M.union outerVars argVars,
                     envExpectedReturnType=Just $ Just cid,
@@ -628,16 +773,7 @@ hoistStrDecl ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition
         propSetter=setter,
         propDefPos=fpos
     }
-    addPropToImpls name pos propImpl [ownCid] impls
-hoistStrDecl _ (InStruct_ImplDefinition {}) _ = do
-    notYet "ImplementationDefinition"
-hoistStrDecl _ (InStruct_AliasDef {}) _ = do
-    notYet "Nested types"
-hoistStrDecl _ (InStruct_ClassDef {}) _ = do
-    notYet "Nested types"
-hoistStrDecl _ (InStruct_StructDef {}) _ = do
-    notYet "Nested types"
-hoistStrDecl _ InStruct_Pass impls = return impls
+    addPropToImpls name pos propImpl [implCid] impls
 
 
 mkMth :: CodePosition -> (MemPt -> FunImpl) -> PropImpl
@@ -648,23 +784,24 @@ mkMth fpos mth = PropImpl {
 }
 
 
-compileClass :: Cid -> UpperIdent -> MaybeTemplateSgn -> [SuperType] -> [VariantDefinition]
+compileClass :: Cid -> UpperIdent -> MaybeTemplateSgn -> S.Set Cid -> [VariantDefinition]
     -> [InClass] -> TCM ClassDesc
-compileClass _cid ident mTmplSgn superClsExprs variants decls = do
+compileClass _cid ident mTmplSgn directSupers variants decls = do
     let UpperIdent (clsPos, clsName) = ident
     assertTmplSgnEmpty mTmplSgn
-    _superClses <- mapM (\(SuperType_ t) -> typeExprSem t) superClsExprs
     when (not $ null variants) $ notYetAt clsPos "variants"
     props <- foldl (>>=) (return M.empty) $ map hoistClsDecl decls
     let cls = ClassDesc {
             className_=clsName,
-            classProps_=props
+            classProps_=props,
+            classDirectSupers=directSupers,
+            classAllSupers=error "Undefined classAllSupers"
         }
     return cls
 
 hoistStrClsDecl :: Cid -> InStruct -> TCM (Maybe InClass)
-hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition {})) = do
-    let (InImplDecl_MethodDefinition ident mTmplSgn fHeader _bodyBlock) = mthDef
+hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImpl_MethodDefinition {})) = do
+    let (InImpl_MethodDefinition ident mTmplSgn fHeader _bodyBlock) = mthDef
     return $ Just (InClass_MethodDeclaration ident mTmplSgn $ fHdrToFSgn fHeader)
     where
         fHdrToFSgn (FHeader_ lp args optResType) = do
@@ -674,8 +811,8 @@ hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImplDecl_MethodDefinition
                         MaybeDefaultVal_Some {} -> ArgOptional
                 ArgSignature_ typeExpr argIdent optionality
             FSignature_ lp args' optResType
-hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefinition {})) = do
-    let (InImplDecl_PropertyDefinition
+hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImpl_PropertyDefinition {})) = do
+    let (InImpl_PropertyDefinition
             typeExpr
             (LowerIdent (pos, name))
             _getDef
@@ -688,8 +825,6 @@ hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImplDecl_PropertyDefini
             propMutability
             typeExpr
             (LowerIdent (pos, name)))
-hoistStrClsDecl _ (InStruct_ImplDefinition {}) =
-    notYet "Well, w sumie to nie wiem"
 hoistStrClsDecl _ _ = return Nothing
 
 hoistClsDecl :: InClass -> M.Map VarName VarType
@@ -734,7 +869,7 @@ addPropToImpls name pos propImpl cids impls0 = do
     foldl (>>=) (return impls0) (map addProp' cids)
     where
         addProp' cid impls = do
-            impl' <- addPropToMap name pos propImpl (impls M.! cid)
+            impl' <- addPropToMap name pos propImpl (impls !!! cid)
             return $ M.insert cid impl' impls
 
 addPropToMap :: VarName -> (Int, Int) -> a -> M.Map VarName a
@@ -1076,6 +1211,20 @@ exprSem (Expr_Var (LowerIdent (pos, varName))) = do
                 return $ RValue cid exeGet
         Nothing -> throwAt pos $ "Undefined variable `" ++ varName ++ "'"
 
+exprSem (Expr_As expr (Tok_As (pos, _)) asExpr) = do
+    exee <- exprSem expr
+    let subCid = expCid exee
+    superCid <- typeExprCid asExpr
+    ok <- isSubclass subCid superCid
+    when (not ok) $ do
+        classes <- gets $ globClasses.sstGlob
+        let subCls = classes !!! subCid
+            superCls = classes !!! superCid
+        throwAt pos ("Illegal cast: expression`" ++ (printTree expr) ++
+                     "' has type `" ++ (className subCls) ++ "', which " ++
+                     "is not a subclass of `" ++ (className superCls) ++ "'")
+    return $ RValue superCid $ expRValue exee
+
 exprSem (Expr_Not expr) = do
     exee <- exprSem expr
     return $ RValue (stdClss M.! "Bool") $ mkExe $ \ke -> do
@@ -1412,3 +1561,35 @@ tryInsert key val m = do
     case M.insertLookupWithKey (\_ _ x -> x) key val m of
         (Nothing, m') -> Right m'
         (Just colliding, _) -> Left colliding
+
+isSubclass :: Cid -> Cid -> TCM Bool
+isSubclass subCid superCid = do
+    if subCid == superCid then do
+        return True
+    else do
+        classes <- gets $ globClasses.sstGlob
+        let subCls = classes !!! subCid
+            superCls = classes !!! superCid
+        case subCls of
+            ClassDesc {} -> case superCls of
+                ClassDesc {} -> do
+                    return $ S.member superCid $ classAllSupers subCls
+                ClassFun _ -> notYet "Function inheritance"
+            ClassFun _ -> notYet "Function inheritance"
+
+closeSuperClss :: S.Set Cid -> TCM (S.Set Cid)
+closeSuperClss directSupers = do
+    classes <- gets $ globClasses.sstGlob
+    let closeSuperClss' acc nextLevelSet = do
+            if S.null nextLevelSet then
+                return acc
+            else do
+                -- Quite inefficient, but who cares? And that's simple.
+                let newCids = nextLevelSet S.\\ acc
+                let acc' = S.union acc newCids
+                let nextLevelSet' = S.unions $ do
+                    cid <- S.toList newCids
+                    return $ classDirectSupers (classes !!! cid)
+                closeSuperClss' acc' nextLevelSet'
+
+    closeSuperClss' S.empty directSupers

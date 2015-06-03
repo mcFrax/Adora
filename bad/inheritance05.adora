@@ -1,0 +1,13 @@
+# implementacja metody z niewłaściwym typem
+
+class Class:
+    mth method() -> Int
+
+struct Struct:
+    mth method():
+        pass
+    implement Class:
+        pass
+
+# EXPECTED COMPILATION ERROR #
+# ???

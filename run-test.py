@@ -104,7 +104,7 @@ def runTest(filename):
         sys.stderr.write("" + filename + ":0:0: TEST FAILED\n")
         sys.stderr.write(40*'-' + '\n')
         sys.stderr.write(f.message)
-        sys.stderr.write(40*'=' + '\n')
+        sys.stderr.write('\n'+ 40*'=' + '\n')
         sys.stderr.flush()
         return False
     if verbose:

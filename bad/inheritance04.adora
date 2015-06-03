@@ -1,0 +1,11 @@
+# brak implementacji metody
+
+class Class:
+    mth method()
+
+struct Struct:
+    implement Class:
+        pass
+
+# EXPECTED COMPILATION ERROR #
+# ???

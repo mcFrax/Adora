@@ -1,0 +1,11 @@
+# brak implementacji property
+
+class Class:
+    Int property
+
+struct Struct:
+    implement Class:
+        pass
+
+# EXPECTED COMPILATION ERROR #
+# ???

@@ -1,0 +1,7 @@
+# cykliczne dziedziczenie struktury
+
+struct Foo(Foo):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# ?:?:?: error: Unable to resolve inheritance: dependency cycle

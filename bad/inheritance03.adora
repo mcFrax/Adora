@@ -1,0 +1,10 @@
+# dziedziczenie klasy ze struktury
+
+struct Struct:
+    pass
+
+class Class(Struct):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# ???

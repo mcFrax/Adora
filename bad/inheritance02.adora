@@ -1,0 +1,10 @@
+# dziedziczenie struktury z abstrakcyjnej klasy
+
+class Class:
+    pass
+
+struct Struct(Class):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# bad/inheritance02.adora:6:8: error: `Class' is abstract class, struct expected

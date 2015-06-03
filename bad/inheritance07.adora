@@ -1,0 +1,14 @@
+# brak settera w implementacji nadpisywalnej property
+
+class Class:
+    writable Int attr
+
+struct Struct:
+    implement Class:
+        Int attr:
+            get:
+                return 0
+            # no setter
+
+# EXPECTED COMPILATION ERROR #
+# ???

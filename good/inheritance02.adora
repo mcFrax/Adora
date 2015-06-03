@@ -1,0 +1,26 @@
+# pośrednia implementacja
+
+class Base():
+    writable Int wr
+    Int ro
+
+class Derived(Base):
+    pass
+
+struct Impl():
+    Int wr_
+    Int wr:
+        get:
+            return self.[wr_]
+        #set:
+            #assert value > 0
+            #self.[wr_] = value
+
+    implement Derived:
+        pass
+
+fn () -> Base:
+    return Impl() as Base
+
+fn () -> Derived:
+    return Impl() as Derived
