@@ -95,6 +95,20 @@ instance MonadReader LocEnv TCM where
 modifyGlob :: (GlobEnv -> GlobEnv) -> TCM ()
 modifyGlob f = modify $ \sst -> sst{sstGlob=f $ sstGlob sst}
 
+updateGlobStr :: Sid -> StructDesc -> TCM ()
+updateGlobStr sid newDesc = do
+    modifyGlob $ \glob -> do
+        glob{
+            globStructs=M.insert sid newDesc $ globStructs glob
+        }
+
+updateGlobCls :: Cid -> ClassDesc -> TCM ()
+updateGlobCls cid newDesc = do
+    modifyGlob $ \glob -> do
+        glob{
+            globClasses=M.insert cid newDesc $ globClasses glob
+        }
+
 -- environment modifications (tampering with Reader part):
 
 setEnv :: LocEnv -> TCM ()
@@ -303,14 +317,13 @@ type AliasSpec = (CodePosition, VarName, Expr)
 
 data HoistAcc = HoistAcc {
     haAliases :: [AliasSpec],
-    haMROSids :: S.Set Sid,
-    haImplSids :: S.Set Sid
+    haMROSids :: S.Set Sid
 }
 
 data HoistingQueue = HoistingQueue HoistAcc (Maybe (HoistingQueue -> TCM HoistingQueue))
 
 emptyHoistingQueue :: HoistingQueue
-emptyHoistingQueue = HoistingQueue (HoistAcc [] S.empty S.empty) Nothing
+emptyHoistingQueue = HoistingQueue (HoistAcc [] S.empty) Nothing
 
 -- hoistStmts zmienia lokalne środowisko uwzględniając wszystkie deklaracje zwarte
 -- w stmts.
@@ -331,7 +344,6 @@ hoistStmts stmts = do
             HoistingQueue accumulated mNextLevel <- level emptyHoistingQueue
             makeAliases $ haAliases accumulated
             resolveMros $ haMROSids accumulated
-            makeImpls $ haImplSids accumulated
             when (isJust mNextLevel) $ do
                 hoist $ fromJust mNextLevel
         makeAliases [] = return ()
@@ -462,15 +474,6 @@ hoistStmts stmts = do
                     throwError $ ErrSomewhere (
                         "Unable to resolve inheritance: MRO confict")
 
-        makeImpls _sids = return () --TODO
-{-
-completeImpls :: M.Map Cid Impl -> Cid -> [Sid] -> TCM (M.Map Cid Impl)
-completeImpls impls ownCid superSids = do
-    classes <- gets $ globClasses.sstGlob
-    structs <- gets $ globStructs.sstGlob
-    liftM M.fromList $ forM (M.toList impls) $ \(cid, ownImpl) -> do
-        return (cid, ownImpl)-}
-
 -- queueNextLevel, queueNextLevels, queueAlias i hoistingDone są mechanizmem
 -- kolejkowania kolejnych etapów hoistingu. Dzieki takiemu rozwiązaniu, kod
 -- hoistingu każdego rodzaju deklaracji jest spójną sekwencją, mimo, że jego
@@ -517,14 +520,6 @@ queueStructMRO sid = do
             }
         return $ HoistingQueue acc' nextLevelAcc
 
-queueStructImpls :: Sid -> TCM (HoistingQueue -> TCM HoistingQueue)
-queueStructImpls sid = do
-    return $ \(HoistingQueue acc nextLevelAcc) -> do
-        let acc' = acc{
-                haImplSids=S.insert sid $ haImplSids acc
-            }
-        return $ HoistingQueue acc' nextLevelAcc
-
 hoistingDone :: TCM (HoistingQueue -> TCM HoistingQueue)
 hoistingDone = return $ return
 
@@ -556,11 +551,6 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
-    let updateDesc newDesc = do
-        modifyGlob $ \glob -> do
-            glob{
-                globClasses=M.insert cid newDesc $ globClasses glob
-            }
     queueNextLevels 2 $ do
         superClses <- forM superClsExprs $ \(SuperType_ t) -> do
             sem <- typeExprSem t
@@ -570,10 +560,10 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
                     "`" ++ (printTree t) ++ "' is struct, abstract class expected")
         let directSupers = S.fromList superClses
         cls <- compileClass cid ident mTmplSgn directSupers variants decls
-        updateDesc cls
+        updateGlobCls cid cls
         queueNextLevel $ do
             allSupers <- closeSuperClss directSupers
-            updateDesc cls{
+            updateGlobCls cid cls{
                 classAllSupers=allSupers
             }
             hoistingDone
@@ -591,20 +581,12 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
     assertTmplSgnEmpty mTmplSgn
     sid <- newSid
     cid <- newCid
+    superCid <- newCid
+    let superName = "<super from " ++ strName ++ ">"
     modifyEnv $ \env -> env {
             envStructs=M.insert strName sid beforeStructs,
             envClasses=M.insert strName cid beforeClasses
         }
-    let updateDesc newDesc = do
-            modifyGlob $ \glob -> do
-                glob{
-                    globStructs=M.insert sid newDesc $ globStructs glob
-                }
-        updateCls newDesc = do
-            modifyGlob $ \glob -> do
-                glob{
-                    globClasses=M.insert cid newDesc $ globClasses glob
-                }
     queueNextLevels 2 $ do  -- 2
         superStrs <- forM superStrExprs $ \(SuperType_ t) -> do
             typeSem <- typeExprSem t
@@ -623,10 +605,16 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
         -- TODO verify inheritance correctness - eliminate implementic struct classes without deriving from them
         clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
         cls <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
-        updateCls cls
+        updateGlobCls cid cls
         queueNextLevel $ do  -- 3
             allSuperClss <- closeSuperClss directSuperClsss
-            updateCls cls{
+            updateGlobCls cid cls{
+                classAllSupers=allSuperClss
+            }
+            updateGlobCls superCid $ ClassDesc {
+                className_=superName,
+                classProps_=classProps cls, -- TODO - clean that
+                classDirectSupers=S.empty, -- doesn't really matter
                 classAllSupers=allSuperClss
             }
             revAttrs <- foldl (>>=) (return []) $ map (hoistStrAttr cid) decls
@@ -639,14 +627,15 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     structMRO=error "Undefined structMRO",
                     structOwnAttrs=attrsMap,
                     structAttrs=error "Undefined structAttrs",
-                    structClasses=error "Undefined structClasses",
+                    structDirImpl=error "Undefined structDirImpl",
+                    structImpl=error "Undefined structImpl",
                     structCtor=error "Undefined structCtor",
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
-            updateDesc structStub
+            updateGlobStr sid structStub
             q1 <- queueStructMRO sid
             q2 <- queueNextLevels 2 $ do  -- 5
-                structStub' <- gets $ (!!! sid).globStructs.sstGlob
+                stubWithMRO <- gets $ (!!! sid).globStructs.sstGlob
                 let mergeAttrs acc [] = return acc
                     mergeAttrs acc (sid':sids) = do
                         attrs' <- gets $ structOwnAttrs.(!!! sid').globStructs.sstGlob
@@ -657,8 +646,8 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                             let (conflicted, _) = M.findMin $ M.intersection acc attrs'
                             throwAt strPos (
                                 "Conflicting attribute definitions for `" ++ conflicted ++ "'")
-                mergedAttrsMap <- mergeAttrs M.empty $ structMRO structStub'
-                let struct = structStub' {
+                mergedAttrsMap <- mergeAttrs M.empty $ structMRO stubWithMRO
+                let stubWithAttrs = stubWithMRO {
                         structCtor=FunImpl ctorSgn constructor,
                         structAttrs=mergedAttrsMap,
                         structCtorSgn=ctorSgn
@@ -683,18 +672,43 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                         -- mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
                         -- TODO: execute custom contructor body/init method?
                         in (reReturn re) (ValRef pt) re mem'
-                updateDesc struct
+                updateGlobStr sid stubWithAttrs
                 queueNextLevel $ do -- 6
-                    let initImpls = S.fold insertEmpty M.empty $ S.insert cid allSuperClss
-                        insertEmpty iCid m = M.insert iCid M.empty m
-                    directImpls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
-                    updateDesc struct {
-                        structClasses=directImpls
+                    directImpl <- foldl (>>=) (return M.empty) $ map (hoistStrDecl cid) decls
+                    let stubWithDirImpls = stubWithAttrs {
+                        structDirImpl=directImpl
                     }
-                    queueStructImpls sid
+                    updateGlobStr sid stubWithDirImpls
+                    queueNextLevel $ do -- 7
+                        impl <- completeImpl sid
+                        let struct = stubWithDirImpls {
+                                    structImpl=impl
+                                }
+                        updateGlobStr sid struct
+                        hoistingDone
             return $ q1 >=> q2
 hoistStmt _stmt = hoistingDone
 
+completeImpl :: Sid -> TCM Impl
+completeImpl sid = do
+    structs <- gets $ globStructs.sstGlob
+    let struct = structs !!! sid
+--         superSids = structMRO struct
+--         revMROImpl = map (structDirImpl.(structs !!!)) (reverse superSids)
+    return $ M.map (\pimpl -> (pimpl, Nothing)) $ structDirImpl struct
+--     liftM M.fromList $ forM (M.toList $ structDirImpl struct) $ \(clsCid, _) -> do
+--         cls <- gets $ (!!! clsCid).globClasses.sstGlob
+--         clsImplPairs <- forM (M.toList classProps cls) $ \(propName, propType) -> do
+--             let f (supImpl, _supSupImpl) dirImpls = do
+--                     case (M.lookup clsCid dirImpls) >>= (M.lookup propName) of
+--                         Just propImpl -> (Just propImpl, supImpl)
+--                         Nothing -> (supImpl, Nothing)
+--             (mImpl, _mSupImpl) <- foldr f (Nothing, Nothing) revMROImpl
+--             case mImpl of
+--                 Just impl -> return impl
+--                 Nothing -> do
+--                     throwAt
+--         return (clsCid, M.fromList clsImplPairs)
 
 extractMaybeSupers :: MaybeSupers -> [SuperType]
 extractMaybeSupers MaybeSupers_None = []
@@ -734,7 +748,7 @@ hoistStrAttr _ decl@(InStruct_AttrDefinition {}) attrs = do
     return $ (name, cid):attrs
 hoistStrAttr _ _ attrs = return attrs
 
-hoistStrDecl :: Cid -> InStruct -> (M.Map Cid Impl) -> TCM (M.Map Cid Impl)
+hoistStrDecl :: Cid -> InStruct -> (M.Map VarName PropImpl) -> TCM (M.Map VarName PropImpl)
 hoistStrDecl _ (InStruct_AttrDefinition {}) impls = return impls
 hoistStrDecl ownCid (InStruct_InImplDecl inImpl) impls = do
     hoistImplDecl ownCid inImpl impls
@@ -748,7 +762,7 @@ hoistStrDecl _ (InStruct_ClassDef {}) _ = do
 hoistStrDecl _ (InStruct_StructDef {}) _ = do
     notYet "Nested types"
 
-hoistImplDecl :: Cid -> InImpl -> (M.Map Cid Impl) -> TCM (M.Map Cid Impl)
+hoistImplDecl :: Cid -> InImpl -> (M.Map VarName PropImpl) -> TCM (M.Map VarName PropImpl)
 hoistImplDecl _ InImpl_Pass impls = return impls
 hoistImplDecl implCid mthDef@(InImpl_MethodDefinition {}) impls = do
     let (InImpl_MethodDefinition
@@ -774,7 +788,7 @@ hoistImplDecl implCid mthDef@(InImpl_MethodDefinition {}) impls = do
     let propImpl = mkMth fpos $ \pt -> FunImpl fnSgn $ \args -> do
             let args' = (Just "self", mkExe $ \kv-> kv $ ValRef pt):args
             mkCall fnSgn defArgs exeBody topLevelFid args'
-    addPropToImpls name pos propImpl [implCid] impls
+    addPropToMap name pos propImpl impls
 hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
     let (InImpl_PropertyDefinition
             typeExpr
@@ -816,7 +830,7 @@ hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
         propSetter=setter,
         propDefPos=fpos
     }
-    addPropToImpls name pos propImpl [implCid] impls
+    addPropToMap name pos propImpl impls
 
 
 mkMth :: CodePosition -> (MemPt -> FunImpl) -> PropImpl
@@ -905,15 +919,6 @@ hoistClsDecl decl@(InClass_MethodDeclaration {}) props = do
         }
     addPropToMap name pos propType props
 hoistClsDecl InClass_Pass props = return props
-
-addPropToImpls :: VarName -> (Int, Int) -> PropImpl -> [Cid] -> M.Map Cid Impl
-    -> TCM (M.Map Cid Impl)
-addPropToImpls name pos propImpl cids impls0 = do
-    foldl (>>=) (return impls0) (map addProp' cids)
-    where
-        addProp' cid impls = do
-            impl' <- addPropToMap name pos propImpl (impls !!! cid)
-            return $ M.insert cid impl' impls
 
 addPropToMap :: VarName -> (Int, Int) -> a -> M.Map VarName a
     -> TCM (M.Map VarName a)
@@ -1393,8 +1398,7 @@ exprSem (Expr_Prop expr (LowerIdent (pos, propName))) = do
         exeProp handler = mkExe $ \ka -> do
             execRValue exee $ \(ValRef objPt) re mem -> let
                 struct = objStruct (memObjAt mem objPt) re
-                impl = (structClasses struct) !!! (structCid struct) -- objCid
-                prop = impl !!! propName
+                (prop, _mSuperProp) = (structImpl struct) !!! propName
                 in (handler prop objPt) ka re mem
     if varMutable propType then
         return $ LValue propCid exeGet exeSet

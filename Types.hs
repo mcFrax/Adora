@@ -85,14 +85,15 @@ data StructDesc = StructDesc {
     structCid :: Cid,
     structDirectSupers :: [Sid],
     structMRO :: [Sid],
-    structOwnAttrs :: M.Map VarName Cid,
+    structOwnAttrs :: M.Map VarName Cid,  -- attrs defined in this struct
     structAttrs :: M.Map VarName Cid,
-    structClasses :: M.Map Cid Impl,
+    structDirImpl :: M.Map VarName PropImpl,  -- prop impls defined/overriden in this struct
+    structImpl :: Impl,
     structCtor :: FunImpl,
     structCtorSgn :: FunSgn
 } deriving Show
 
-type Impl = M.Map VarName PropImpl  -- both props and mths
+type Impl = M.Map VarName (PropImpl, Maybe PropImpl)  -- both props and mths
 
 data PropImpl = PropImpl {
     propGetter :: MemPt -> Exe VarVal,
