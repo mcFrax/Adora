@@ -680,7 +680,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     }
                     updateGlobStr sid stubWithDirImpls
                     queueNextLevel $ do -- 7
-                        impl <- completeImpl sid
+                        impl <- completeImpl strPos sid $ classProps cls
                         let struct = stubWithDirImpls {
                                     structImpl=impl
                                 }
@@ -689,26 +689,26 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
             return $ q1 >=> q2
 hoistStmt _stmt = hoistingDone
 
-completeImpl :: Sid -> TCM Impl
-completeImpl sid = do
+completeImpl :: (Int, Int) -> Sid -> M.Map VarName VarType -> TCM Impl
+completeImpl pos sid props = do
     structs <- gets $ globStructs.sstGlob
     let struct = structs !!! sid
---         superSids = structMRO struct
---         revMROImpl = map (structDirImpl.(structs !!!)) (reverse superSids)
-    return $ M.map (\pimpl -> (pimpl, Nothing)) $ structDirImpl struct
---     liftM M.fromList $ forM (M.toList $ structDirImpl struct) $ \(clsCid, _) -> do
---         cls <- gets $ (!!! clsCid).globClasses.sstGlob
---         clsImplPairs <- forM (M.toList classProps cls) $ \(propName, propType) -> do
---             let f (supImpl, _supSupImpl) dirImpls = do
---                     case (M.lookup clsCid dirImpls) >>= (M.lookup propName) of
---                         Just propImpl -> (Just propImpl, supImpl)
---                         Nothing -> (supImpl, Nothing)
---             (mImpl, _mSupImpl) <- foldr f (Nothing, Nothing) revMROImpl
---             case mImpl of
---                 Just impl -> return impl
---                 Nothing -> do
---                     throwAt
---         return (clsCid, M.fromList clsImplPairs)
+        superSids = structMRO struct
+        revMROImpl = map (structDirImpl.(structs !!!)) (reverse superSids)
+
+    liftM M.fromList $ forM (M.toList props) $ \(propName, _) -> do
+        let f (supImpl, _supSupImpl) dirImpl = do
+            case M.lookup propName dirImpl of
+                Just propImpl -> (Just propImpl, supImpl)
+                Nothing -> (supImpl, Nothing)
+        let (mImpl, mSupImpl) = foldl f (Nothing, Nothing) revMROImpl
+        case mImpl of
+            Just impl -> return (propName, (impl, mSupImpl))
+            Nothing -> do
+                throwAt pos ("No implementation for method/property `" ++
+                            propName ++ "' in struct `" ++
+                            (structName struct) ++ "'")
+
 
 extractMaybeSupers :: MaybeSupers -> [SuperType]
 extractMaybeSupers MaybeSupers_None = []
