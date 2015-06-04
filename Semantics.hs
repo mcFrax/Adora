@@ -244,9 +244,10 @@ stmtBlockSem (StatementBlock_ stmts) = local id $ stmtSeqSem stmts
 
 stmtSeqSem :: [Stmt] -> TCM (Exe ())
 stmtSeqSem stmts = do
-    hoisted stmts $ stmtSeqSem' stmts
+    hoistStmts stmts
+    stmtSeqSem' stmts
     where
-        stmtSeqSem' [] = return noop -- TODO: check return
+        stmtSeqSem' [] = return noop
         stmtSeqSem' (h:t) = do
             (hexe, t') <- case h of
                 Stmt_If (Tok_If (_pos, _)) condExpr bodyBlock -> do
@@ -300,31 +301,48 @@ stmtSeqSem stmts = do
 
 type AliasSpec = (CodePosition, VarName, Expr)
 
-type HoistingExtras = ([AliasSpec], S.Set Sid)
+data HoistAcc = HoistAcc {
+    haAliases :: [AliasSpec],
+    haMROSids :: S.Set Sid,
+    haImplSids :: S.Set Sid
+}
 
-data HoistingLevel = HoistingMore HoistingExtras (TCM HoistingLevel)
-                   | HoistingEnd HoistingExtras
+data HoistingQueue = HoistingQueue HoistAcc (Maybe (HoistingQueue -> TCM HoistingQueue))
 
-hoisted :: [Stmt] -> TCM (Exe a) -> TCM (Exe a)
-hoisted stmts innerSem = do
-    level1 <- (foldl (>>=) (return $ HoistingEnd ([], S.empty))) =<< (mapM hoistStmt stmts)
-    hoist level1
-    innerSem
+emptyHoistingQueue :: HoistingQueue
+emptyHoistingQueue = HoistingQueue (HoistAcc [] S.empty S.empty) Nothing
+
+-- hoistStmts zmienia lokalne środowisko uwzględniając wszystkie deklaracje zwarte
+-- w stmts.
+-- Nie wykorzystuję tu local, tylko zmieniam środowisko w trakcie wykonania, co
+-- jest w zasadzie naruszeniem założeń MonadReader, jednak znacząco upraszcza
+-- implementację. Całość jest zawinięta w local gdzieś przy wywołaniu, dzięki
+-- czemu zmienione środowisko jest używane tylko tam, gdzie trzeba.
+
+hoistStmts :: [Stmt] -> TCM ()
+hoistStmts stmts = do
+    let f acc stmt = do
+        hoistedStmt <- hoistStmt stmt
+        return (acc >=> hoistedStmt)
+    hoist =<< (foldM f return stmts)
     where
-        hoist (HoistingMore (aliases, sids) nextLevel) = do
-            makeAliases aliases
-            resolveMros sids
-            nextLevel' <- nextLevel
-            hoist nextLevel'
-        hoist (HoistingEnd (aliases, sids)) = do
-            makeAliases aliases
-            resolveMros sids
+        hoist :: (HoistingQueue -> TCM HoistingQueue) -> TCM ()
+        hoist level = do
+            HoistingQueue accumulated mNextLevel <- level emptyHoistingQueue
+            makeAliases $ haAliases accumulated
+            resolveMros $ haMROSids accumulated
+            makeImpls $ haImplSids accumulated
+            when (isJust mNextLevel) $ do
+                hoist $ fromJust mNextLevel
         makeAliases [] = return ()
         makeAliases aliases = do
             let aliases' = flip map aliases $ \(fpos, name, expr) -> do
                     (fpos, name, expr, Nothing)
                 leftNames = S.fromList $ map (\(_, name, _) -> name) aliases
             makeAliases' aliases' leftNames
+
+        -- aliases, sids i nextLevel są wypełniane przy pomocy funkcji queue..
+        -- opisanych poniżej.
 
         makeAliases' :: [(CodePosition, VarName, Expr, Maybe VarName)]
             -> S.Set VarName -> TCM ()
@@ -444,6 +462,15 @@ hoisted stmts innerSem = do
                     throwError $ ErrSomewhere (
                         "Unable to resolve inheritance: MRO confict")
 
+        makeImpls _sids = return () --TODO
+{-
+completeImpls :: M.Map Cid Impl -> Cid -> [Sid] -> TCM (M.Map Cid Impl)
+completeImpls impls ownCid superSids = do
+    classes <- gets $ globClasses.sstGlob
+    structs <- gets $ globStructs.sstGlob
+    liftM M.fromList $ forM (M.toList impls) $ \(cid, ownImpl) -> do
+        return (cid, ownImpl)-}
+
 -- queueNextLevel, queueNextLevels, queueAlias i hoistingDone są mechanizmem
 -- kolejkowania kolejnych etapów hoistingu. Dzieki takiemu rozwiązaniu, kod
 -- hoistingu każdego rodzaju deklaracji jest spójną sekwencją, mimo, że jego
@@ -455,49 +482,53 @@ hoisted stmts innerSem = do
 -- zbieranie zbioru aliasów w celu wspólnej obsługi. Rozwiązanie można
 -- łatwo rozszerzyć na zbieranie innego typu zadań na dowolnym etapie.
 
--- EDIT: Doszedł queueStruct, robiący coś podobnego dla rozwiązywania
+-- EDIT: Doszedł queueStructMRO, robiący coś podobnego dla rozwiązywania
 -- dziedziczenia, i możliwe, że będzie jeszcze coś podobnego dla klas.
 
-queueNextLevel :: TCM (HoistingLevel -> TCM HoistingLevel)
-    -> TCM (HoistingLevel -> TCM HoistingLevel)
+queueNextLevel :: TCM (HoistingQueue -> TCM HoistingQueue)
+    -> TCM (HoistingQueue -> TCM HoistingQueue)
 queueNextLevel nextLevel = do
-    return $ \hoistingAcc -> do
+    return $ \(HoistingQueue acc nextLevelAcc) -> do
         nextLevel' <- nextLevel
-        case hoistingAcc of
-            HoistingMore extras hoistingAcc' -> do
-                return $ HoistingMore extras $ do
-                    hoistingAcc' >>= nextLevel'
-            HoistingEnd extras -> do
-                return $ HoistingMore extras $ nextLevel' $ HoistingEnd ([], S.empty)
+        if isJust nextLevelAcc then do
+            return $ HoistingQueue acc (Just ((fromJust nextLevelAcc) >=> nextLevel'))
+        else do
+            return $ HoistingQueue acc (Just nextLevel')
 
-queueNextLevels :: Integer -> TCM (HoistingLevel -> TCM HoistingLevel)
-    -> TCM (HoistingLevel -> TCM HoistingLevel)
+queueNextLevels :: Integer -> TCM (HoistingQueue -> TCM HoistingQueue)
+    -> TCM (HoistingQueue -> TCM HoistingQueue)
 queueNextLevels n queued
     | n <= 0 = queued
     | otherwise = queueNextLevels (n-1) $ queueNextLevel queued
 
-queueAlias :: AliasSpec -> TCM (HoistingLevel -> TCM HoistingLevel)
+queueAlias :: AliasSpec -> TCM (HoistingQueue -> TCM HoistingQueue)
 queueAlias alias = do
-    return $ \hoistingAcc -> do
-        case hoistingAcc of
-            HoistingMore (aliases, sids) hoistingAcc' -> do
-                return $ HoistingMore (alias:aliases, sids) hoistingAcc'
-            HoistingEnd (aliases, sids) -> do
-                return $ HoistingEnd (alias:aliases, sids)
+    return $ \(HoistingQueue acc nextLevelAcc) -> do
+        let acc' = acc{
+                haAliases=alias:(haAliases acc)
+            }
+        return $ HoistingQueue acc' nextLevelAcc
 
-queueStruct :: Sid -> TCM (HoistingLevel -> TCM HoistingLevel)
-queueStruct sid = do
-    return $ \hoistingAcc -> do
-        case hoistingAcc of
-            HoistingMore (aliases, sids) hoistingAcc' -> do
-                return $ HoistingMore (aliases, S.insert sid sids) hoistingAcc'
-            HoistingEnd (aliases, sids) -> do
-                return $ HoistingEnd (aliases, S.insert sid sids)
+queueStructMRO :: Sid -> TCM (HoistingQueue -> TCM HoistingQueue)
+queueStructMRO sid = do
+    return $ \(HoistingQueue acc nextLevelAcc) -> do
+        let acc' = acc{
+                haMROSids=S.insert sid $ haMROSids acc
+            }
+        return $ HoistingQueue acc' nextLevelAcc
 
-hoistingDone :: TCM (HoistingLevel -> TCM HoistingLevel)
+queueStructImpls :: Sid -> TCM (HoistingQueue -> TCM HoistingQueue)
+queueStructImpls sid = do
+    return $ \(HoistingQueue acc nextLevelAcc) -> do
+        let acc' = acc{
+                haImplSids=S.insert sid $ haImplSids acc
+            }
+        return $ HoistingQueue acc' nextLevelAcc
+
+hoistingDone :: TCM (HoistingQueue -> TCM HoistingQueue)
 hoistingDone = return $ return
 
-hoistStmt :: Stmt -> TCM (HoistingLevel -> TCM HoistingLevel)
+hoistStmt :: Stmt -> TCM (HoistingQueue -> TCM HoistingQueue)
 hoistStmt (Stmt_Let ident _ expr) = do
     queueNextLevels 5 $ do
         cid <- deduceType expr
@@ -613,7 +644,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
             updateDesc structStub
-            q1 <- queueStruct sid
+            q1 <- queueStructMRO sid
             q2 <- queueNextLevels 2 $ do  -- 5
                 structStub' <- gets $ (!!! sid).globStructs.sstGlob
                 let mergeAttrs acc [] = return acc
@@ -657,11 +688,10 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     let initImpls = S.fold insertEmpty M.empty $ S.insert cid allSuperClss
                         insertEmpty iCid m = M.insert iCid M.empty m
                     directImpls <- foldl (>>=) (return initImpls) $ map (hoistStrDecl cid) decls
-                    impls <- completeImpls directImpls cid $ map typeSid superStrs
                     updateDesc struct {
-                        structClasses=impls
+                        structClasses=directImpls
                     }
-                    hoistingDone
+                    queueStructImpls sid
             return $ q1 >=> q2
 hoistStmt _stmt = hoistingDone
 
@@ -670,11 +700,8 @@ extractMaybeSupers :: MaybeSupers -> [SuperType]
 extractMaybeSupers MaybeSupers_None = []
 extractMaybeSupers (MaybeSupers_Some _ supers) = supers
 
-completeImpls :: M.Map Cid Impl -> Cid -> [Sid] -> TCM (M.Map Cid Impl)
-completeImpls impls _ownCid _superSids = return impls
 
-
-hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingLevel -> TCM HoistingLevel)
+hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingQueue -> TCM HoistingQueue)
 hoistVar cid mutable (LowerIdent (pos, varName)) = do
     do
         vars <- asks envVars
