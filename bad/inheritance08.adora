@@ -7,4 +7,4 @@ class Derived(Base):
     Int prop
 
 # EXPECTED COMPILATION ERROR #
-# konflikt property z klasą bazową
+# bad/inheritance08.adora:6:7: error: Colliding declarations for property `prop' between superclasses

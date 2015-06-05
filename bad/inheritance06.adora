@@ -8,4 +8,4 @@ struct Struct:
         pass
 
 # EXPECTED COMPILATION ERROR #
-# brak implementacji property
+# bad/inheritance06.adora:6:8: error: No implementation for method/property `property' in struct `Struct'

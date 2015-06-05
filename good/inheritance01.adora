@@ -7,9 +7,9 @@ struct Impl():
     Int wr:
         get:
             return self.[wr_]
-        #set:
-            #assert value > 0
-            #self.[wr_] = value
+        set:
+            assert value > 0
+            self.[wr_] = value
 
     implement Base:
         pass

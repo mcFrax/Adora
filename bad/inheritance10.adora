@@ -1,4 +1,4 @@
-# konflikt properties pomiędzy structami bazowymi
+# konflikt atrybutów pomiędzy structami bazowymi
 
 struct Base1:
     Int attr

@@ -178,6 +178,7 @@ stdGlobClss = do
     where
         f (name, cid) = (cid, ClassDesc {
             className_=name,
+            classOwnProps=M.empty,
             classProps_=M.empty,
             classDirectSupers=S.empty,
             classAllSupers=S.empty
@@ -551,7 +552,7 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
     modifyEnv $ \env -> env {
             envClasses=M.insert clsName cid beforeClasses
         }
-    queueNextLevels 2 $ do
+    queueNextLevels 2 $ do  -- 2
         superClses <- forM superClsExprs $ \(SuperType_ t) -> do
             sem <- typeExprSem t
             case sem of
@@ -559,14 +560,21 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
                 StrExpr {} -> throwAt pos $ (
                     "`" ++ (printTree t) ++ "' is struct, abstract class expected")
         let directSupers = S.fromList superClses
-        cls <- compileClass cid ident mTmplSgn directSupers variants decls
-        updateGlobCls cid cls
-        queueNextLevel $ do
+        clsStub <- compileClass cid ident mTmplSgn directSupers variants decls
+        updateGlobCls cid clsStub
+        queueNextLevel $ do  -- 3
             allSupers <- closeSuperClss directSupers
-            updateGlobCls cid cls{
+            let clsStubWithAllSupers = clsStub {
                 classAllSupers=allSupers
             }
-            hoistingDone
+            updateGlobCls cid clsStubWithAllSupers
+            queueNextLevels 2 $ do  -- 5
+                clsProps <- collectProps pos cid
+                let cls = clsStubWithAllSupers {
+                    classProps_=clsProps
+                }
+                updateGlobCls cid cls
+                hoistingDone
 
 hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
     let (TypeDefinition_Struct ident mTmplSgn maybeSupers decls) = strDef
@@ -582,7 +590,6 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
     sid <- newSid
     cid <- newCid
     superCid <- newCid
-    let superName = "<super from " ++ strName ++ ">"
     modifyEnv $ \env -> env {
             envStructs=M.insert strName sid beforeStructs,
             envClasses=M.insert strName cid beforeClasses
@@ -604,19 +611,14 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
         let directSuperClsss = S.fromList $ superStrClss ++ implClss
         -- TODO verify inheritance correctness - eliminate implementic struct classes without deriving from them
         clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
-        cls <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
-        updateGlobCls cid cls
+        clsStub <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
+        updateGlobCls cid clsStub
         queueNextLevel $ do  -- 3
             allSuperClss <- closeSuperClss directSuperClsss
-            updateGlobCls cid cls{
+            let clsStubWithAllSupers = clsStub {
                 classAllSupers=allSuperClss
             }
-            updateGlobCls superCid $ ClassDesc {
-                className_=superName,
-                classProps_=classProps cls, -- TODO - clean that
-                classDirectSupers=S.empty, -- doesn't really matter
-                classAllSupers=allSuperClss
-            }
+            updateGlobCls cid clsStubWithAllSupers
             revAttrs <- foldl (>>=) (return []) $ map (hoistStrAttr cid) decls
             let attrs = reverse revAttrs
                 attrsMap = M.fromList attrs
@@ -635,6 +637,18 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
             updateGlobStr sid structStub
             q1 <- queueStructMRO sid
             q2 <- queueNextLevels 2 $ do  -- 5
+                clsProps <- collectProps strPos cid
+                let cls = clsStubWithAllSupers {
+                    classProps_=clsProps
+                }
+                updateGlobCls cid cls
+                updateGlobCls superCid $ ClassDesc {
+                    className_="<super from " ++ strName ++ ">",
+                    classProps_=clsProps, -- TODO - clean that
+                    classOwnProps=M.empty, -- doesn't really matter
+                    classDirectSupers=S.empty, -- TODO - clean that
+                    classAllSupers=allSuperClss
+                }
                 stubWithMRO <- gets $ (!!! sid).globStructs.sstGlob
                 let mergeAttrs acc [] = return acc
                     mergeAttrs acc (sid':sids) = do
@@ -680,7 +694,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     }
                     updateGlobStr sid stubWithDirImpls
                     queueNextLevel $ do -- 7
-                        impl <- completeImpl strPos sid $ classProps cls
+                        impl <- completeImpl strPos sid $ clsProps
                         let struct = stubWithDirImpls {
                                     structImpl=impl
                                 }
@@ -708,6 +722,28 @@ completeImpl pos sid props = do
                 throwAt pos ("No implementation for method/property `" ++
                             propName ++ "' in struct `" ++
                             (structName struct) ++ "'")
+
+collectProps :: (Int, Int) -> Cid -> TCM (M.Map VarName VarType)
+collectProps pos cid = do
+    classes <- gets $ globClasses.sstGlob
+    let cls = classes !!! cid
+        supers = map (classes !!!) $ [cid] ++ (S.toList $ classAllSupers cls)
+        superProps = map classOwnProps supers
+        f collected new = do
+            let extract (VarType mut vCid _) = (mut, vCid)
+                intersection1 = M.map extract $ M.intersection collected new
+                intersection2 = M.map extract $ M.intersection new collected
+                collected' = M.union collected new
+            if intersection1 == intersection2 then do
+                return collected'
+            else do
+                let mergeF _ a b = if a == b then Nothing else Just (a, b)
+                    collisions = M.keys (M.mergeWithKey
+                                  mergeF (const M.empty) (const M.empty)
+                                  intersection1 intersection2)
+                throwAt pos ("Colliding declarations for property `" ++
+                             (head collisions) ++ "' between superclasses")
+    foldM f M.empty superProps
 
 
 extractMaybeSupers :: MaybeSupers -> [SuperType]
@@ -754,7 +790,18 @@ hoistStrDecl ownCid (InStruct_InImplDecl inImpl) impls = do
     hoistImplDecl ownCid inImpl impls
 hoistStrDecl _ (InStruct_ImplDefinition clsName inImpls) impls = do
     implCid <- typeExprCid clsName
-    foldl (>>=) (return impls) $ map (hoistImplDecl implCid) inImpls
+    implProps <- foldl (>>=) (return M.empty) $ flip map inImpls $ \inImpl props -> do
+        inClass <- inImplToInClass inImpl
+        hoistClsDecl inClass props
+    clsProps <- gets $ classProps.(!!! implCid).globClasses.sstGlob
+    let implPropsSet = S.fromList $ map (\(n, VarType mut cid _) -> (n, mut, cid)) $ M.toList implProps
+        clsPropsSet = S.fromList $ map (\(n, VarType mut cid _) -> (n, mut, cid)) $ M.toList clsProps
+        bads = implPropsSet S.\\ clsPropsSet
+    if S.null bads then do
+        foldl (>>=) (return impls) $ map (hoistImplDecl implCid) inImpls
+    else do
+        throwError $ ErrSomewhere ("Incorrect property definition in `" ++
+                                   (printTree clsName) ++ "' implementation")
 hoistStrDecl _ (InStruct_AliasDef {}) _ = do
     notYet "Nested types"
 hoistStrDecl _ (InStruct_ClassDef {}) _ = do
@@ -850,16 +897,22 @@ compileClass _cid ident mTmplSgn directSupers variants decls = do
     props <- foldl (>>=) (return M.empty) $ map hoistClsDecl decls
     let cls = ClassDesc {
             className_=clsName,
-            classProps_=props,
+            classOwnProps=props,
+            classProps_=error "Undefine classProps_",
             classDirectSupers=directSupers,
             classAllSupers=error "Undefined classAllSupers"
         }
     return cls
 
 hoistStrClsDecl :: Cid -> InStruct -> TCM (Maybe InClass)
-hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImpl_MethodDefinition {})) = do
+hoistStrClsDecl _ownCid (InStruct_InImplDecl inImpl) = do
+    liftM Just $ inImplToInClass inImpl
+hoistStrClsDecl _ _ = return Nothing
+
+inImplToInClass :: InImpl -> TCM (InClass)
+inImplToInClass mthDef@(InImpl_MethodDefinition {}) = do
     let (InImpl_MethodDefinition ident mTmplSgn fHeader _bodyBlock) = mthDef
-    return $ Just (InClass_MethodDeclaration ident mTmplSgn $ fHdrToFSgn fHeader)
+    return (InClass_MethodDeclaration ident mTmplSgn $ fHdrToFSgn fHeader)
     where
         fHdrToFSgn (FHeader_ lp args optResType) = do
             let args' = flip map args $ \(ArgDefinition_ typeExpr argIdent mDefVal) -> do
@@ -868,7 +921,7 @@ hoistStrClsDecl _ownCid (InStruct_InImplDecl mthDef@(InImpl_MethodDefinition {})
                         MaybeDefaultVal_Some {} -> ArgOptional
                 ArgSignature_ typeExpr argIdent optionality
             FSignature_ lp args' optResType
-hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImpl_PropertyDefinition {})) = do
+inImplToInClass propDecl@(InImpl_PropertyDefinition {}) = do
     let (InImpl_PropertyDefinition
             typeExpr
             (LowerIdent (pos, name))
@@ -878,11 +931,11 @@ hoistStrClsDecl _ownCid (InStruct_InImplDecl propDecl@(InImpl_PropertyDefinition
         if maybeSet == MaybeSetClause_None
             then PropReadOnly
             else PropWritable
-    return $ Just (InClass_PropertyDeclaration
+    return (InClass_PropertyDeclaration
             propMutability
             typeExpr
             (LowerIdent (pos, name)))
-hoistStrClsDecl _ _ = return Nothing
+inImplToInClass InImpl_Pass = return InClass_Pass
 
 hoistClsDecl :: InClass -> M.Map VarName VarType
     -> TCM (M.Map VarName VarType)

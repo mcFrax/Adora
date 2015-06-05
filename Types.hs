@@ -54,6 +54,7 @@ data RunEnv = RunEnv {
 
 data ClassDesc = ClassDesc {
     className_ :: String,
+    classOwnProps :: M.Map VarName VarType,
     classProps_ :: M.Map VarName VarType,
     classDirectSupers :: S.Set Cid,
     classAllSupers :: S.Set Cid

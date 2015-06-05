@@ -10,4 +10,4 @@ class Derived(Base1, Base2):
     pass
 
 # EXPECTED COMPILATION ERROR #
-# konflikt properties pomiędzy klasami bazowymi
+# bad/inheritance09.adora:9:7: error: Colliding declarations for property `prop' between superclasses

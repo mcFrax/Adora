@@ -10,4 +10,4 @@ struct Struct:
         pass
 
 # EXPECTED COMPILATION ERROR #
-# implementacja metody z niewłaściwym typem
+# bad/inheritance05.adora:6:8: error: Colliding declarations for property `method' between superclasses
