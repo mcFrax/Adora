@@ -2,6 +2,7 @@ module Types where
 
 import Control.DeepSeq
 import Control.Exception
+import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Exit(exitWith, ExitCode(..))
@@ -19,8 +20,9 @@ internalCodePos = ("<internal>", 0, 0)
 type VarName = String
 data VarType = VarType {
     varMutable :: Bool,
-    -- varInitialized :: Bool, --TODO
     varClass :: Cid,
+    varStatic :: Bool, -- is it visible in methods?
+    -- varInitialized :: Bool, --TODO
     varDefPos :: CodePosition
 } deriving Show
 
@@ -63,7 +65,13 @@ data ClassDesc = ClassDesc {
 
 className :: ClassDesc -> VarName
 className (ClassDesc{className_=name}) = name
-className (ClassFun sgn) = "<" ++ (show sgn) ++ ">"
+className (ClassFun sgn) = do
+    "<(" ++ (intercalate ", " args) ++ ") -> " ++ (show $ mthRetType sgn) ++ ">"
+    where
+        args = flip map (mthArgs sgn) $ \as -> do
+            "<" ++ (show $ argType as) ++ "> " ++ case argName as of
+                Just name -> name
+                Nothing -> "_"
 
 classProps :: ClassDesc -> M.Map VarName VarType
 classProps (ClassDesc{classProps_=props}) = props

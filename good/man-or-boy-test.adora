@@ -14,8 +14,8 @@ let a = fn(Int k, IF x1, IF x2, IF x3, IF x4, IF x5) -> Int:
     else:
         return b()
 
-let x = fn(Int i) -> (Int _) -> Int:
-    return fn(Int _) -> Int:
+let x = fn(Int i) -> () -> Int:
+    return fn() -> Int:
         return i
 
 var ii = 0

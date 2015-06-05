@@ -13,5 +13,5 @@ print 'h', 'e', 'l', 'l', 'o', ',', ' ', 'W', 'o', 'r', 'l', 'd', '!'
 # false
 # 1 2 3 4
 # <function object>
-# <object@0>
+# <object@1>
 # 'h' 'e' 'l' 'l' 'o' ',' ' ' 'W' 'o' 'r' 'l' 'd' '!'

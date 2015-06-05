@@ -230,8 +230,8 @@ moduleSem (Module_ stmts) fileName = do
 
         initEnv = LocEnv {
             envVars=M.fromList [
-                ("true", VarType True (stdClss M.! "Bool") internalCodePos),
-                ("false", VarType False (stdClss M.! "Bool") internalCodePos)
+                ("true", VarType True (stdClss M.! "Bool") True internalCodePos),
+                ("false", VarType False (stdClss M.! "Bool") True internalCodePos)
             ],
             envClasses=stdClss,
             envStructs=M.empty,
@@ -730,7 +730,7 @@ collectProps pos cid = do
         supers = map (classes !!!) $ [cid] ++ (S.toList $ classAllSupers cls)
         superProps = map classOwnProps supers
         f collected new = do
-            let extract (VarType mut vCid _) = (mut, vCid)
+            let extract (VarType mut vCid _ _) = (mut, vCid)
                 intersection1 = M.map extract $ M.intersection collected new
                 intersection2 = M.map extract $ M.intersection new collected
                 collected' = M.union collected new
@@ -753,22 +753,23 @@ extractMaybeSupers (MaybeSupers_Some _ supers) = supers
 
 hoistVar :: Cid -> Bool -> LowerIdent -> TCM (HoistingQueue -> TCM HoistingQueue)
 hoistVar cid mutable (LowerIdent (pos, varName)) = do
-    do
-        vars <- asks envVars
-        fpos <- completePos pos
-        case M.lookup varName vars of
-            Just var -> do
-                throwAt pos (
-                    "variable redefined: `" ++ varName ++ "'\n" ++
-                    (showPos $ varDefPos var) ++ ": Previously defined here")
-            Nothing -> do
-                let var = VarType {
-                    varClass=cid,
-                    varMutable=mutable,
-                    varDefPos=fpos
-                }
-                modifyEnv $ \env -> env{envVars=M.insert varName var vars}
-                hoistingDone
+    vars <- asks envVars
+    fpos <- completePos pos
+    isStatic <- asks $ isNothing.envExpectedReturnType
+    case M.lookup varName vars of
+        Just var -> do
+            throwAt pos (
+                "variable redefined: `" ++ varName ++ "'\n" ++
+                (showPos $ varDefPos var) ++ ": Previously defined here")
+        Nothing -> do
+            let var = VarType {
+                varClass=cid,
+                varMutable=mutable,
+                varStatic=isStatic,
+                varDefPos=fpos
+            }
+            modifyEnv $ \env -> env{envVars=M.insert varName var vars}
+            hoistingDone
 
 
 hoistStrAttr :: Cid -> InStruct -> [(VarName, Cid)]
@@ -794,8 +795,8 @@ hoistStrDecl _ (InStruct_ImplDefinition clsName inImpls) impls = do
         inClass <- inImplToInClass inImpl
         hoistClsDecl inClass props
     clsProps <- gets $ classProps.(!!! implCid).globClasses.sstGlob
-    let implPropsSet = S.fromList $ map (\(n, VarType mut cid _) -> (n, mut, cid)) $ M.toList implProps
-        clsPropsSet = S.fromList $ map (\(n, VarType mut cid _) -> (n, mut, cid)) $ M.toList clsProps
+    let implPropsSet = S.fromList $ map (\(n, VarType mut cid _ _) -> (n, mut, cid)) $ M.toList implProps
+        clsPropsSet = S.fromList $ map (\(n, VarType mut cid _ _) -> (n, mut, cid)) $ M.toList clsProps
         bads = implPropsSet S.\\ clsPropsSet
     if S.null bads then do
         foldl (>>=) (return impls) $ map (hoistImplDecl implCid) inImpls
@@ -820,14 +821,15 @@ hoistImplDecl implCid mthDef@(InImpl_MethodDefinition {}) impls = do
     fpos <- completePos pos
     assertTmplSgnEmpty mTmplSgn
     (fnSgn, defArgs, argDefPoss) <- fHeaderSem header CompileDefaults
---                     outerVars <- asks envVars
+    outerVars <- liftM (M.filter varStatic) $ asks envVars
     let argVars = M.insert "self" (VarType {
             varMutable=False,
             varClass=implCid,
+            varStatic=False,
             varDefPos=fpos
         }) $ argsToVars (mthArgs fnSgn) argDefPoss
     let makeInEnv outEnv = outEnv{
-            envVars=argVars, -- M.union outerVars argVars,
+            envVars=M.union argVars outerVars,
             envExpectedReturnType=Just $ mthRetType fnSgn,
             envInsideLoop=False
         }
@@ -850,13 +852,14 @@ hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
                 mthRetType=Just cid,
                 mthArgs=[]
             }
---                          outerVars <- asks envVars
+            outerVars <- liftM (M.filter varStatic) $ asks envVars
             let makeInEnv outEnv = outEnv{
-                    envVars=M.fromList [("self", VarType {
-                        varMutable=False,
-                        varClass=implCid,
-                        varDefPos=fpos
-                    })], -- M.union outerVars argVars,
+                    envVars=M.union (M.fromList [("self", VarType {
+                            varMutable=False,
+                            varClass=implCid,
+                            varStatic=False,
+                            varDefPos=fpos
+                        })]) outerVars,
                     envExpectedReturnType=Just $ Just cid,
                     envInsideLoop=False
                 }
@@ -877,20 +880,22 @@ hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
                     argHasDefault=False
                 }]
             }
---                          outerVars <- asks envVars
+            outerVars <- liftM (M.filter varStatic) $ asks envVars
             let makeInEnv outEnv = outEnv{
-                    envVars=M.fromList [
-                        ("self", VarType {
-                            varMutable=False,
-                            varClass=implCid,
-                            varDefPos=fpos
-                        }),
-                        ("value", VarType {
-                            varMutable=False,
-                            varClass=cid,
-                            varDefPos=fpos
-                        })
-                    ], -- M.union outerVars argVars,
+                    envVars= M.union (M.fromList [
+                            ("self", VarType {
+                                varMutable=False,
+                                varClass=implCid,
+                                varStatic=False,
+                                varDefPos=fpos
+                            }),
+                            ("value", VarType {
+                                varMutable=False,
+                                varClass=cid,
+                                varStatic=False,
+                                varDefPos=fpos
+                            })
+                        ]) outerVars,
                     envExpectedReturnType=Just $ Nothing,
                     envInsideLoop=False
                 }
@@ -979,6 +984,7 @@ hoistClsDecl propDecl@(InClass_PropertyDeclaration {}) props = do
     let propType = VarType {
             varMutable=propMutability == PropWritable,
             varClass=propCid,
+            varStatic=False,
             varDefPos=fpos
         }
     addPropToMap name pos propType props
@@ -998,6 +1004,7 @@ hoistClsDecl decl@(InClass_MethodDeclaration {}) props = do
     let propType = VarType {
             varMutable=False,
             varClass=propCid,
+            varStatic=False,
             varDefPos=fpos
         }
     addPropToMap name pos propType props
@@ -1240,7 +1247,7 @@ deduceType (Expr_Int _) = return (stdClss M.! "Int")
 deduceType (Expr_Var (LowerIdent (pos, varName))) = do
     vars <- asks envVars
     case M.lookup varName vars of
-        Just (VarType _ cid _) -> return cid
+        Just (VarType _ cid _ _) -> return cid
         Nothing -> throwAt pos $ "Undefined variable `" ++ varName ++ "'"
 
 deduceType (Expr_Not _) = return (stdClss M.! "Bool")
@@ -1331,7 +1338,7 @@ exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExe ($ ValInt $ f
 exprSem (Expr_Var (LowerIdent (pos, varName))) = do
     vars <- asks envVars
     case M.lookup varName vars of
-        Just (VarType mutable cid _) -> do
+        Just (VarType mutable cid _ _) -> do
             let exeGet = do
                  mkExe $ \kv re mem -> kv (getVar varName mem) re mem
             if mutable then do
@@ -1490,14 +1497,15 @@ exprSem (Expr_Prop expr (LowerIdent (pos, propName))) = do
 
 exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
     exeFn <- exprSem expr
-    argTuples <- mapM argSem args
-    kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argTuples
+    (argCidTuples, argExeTuples) <- liftM unzip $ mapM argSem args
+    kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argExeTuples
     let kwargsSet = foldl (\s (n, _) -> S.insert n s) S.empty kwargs
     when ((S.size kwargsSet) /= (length kwargs)) $ do
         throwAt pos "Kwarg names not unique"
     classes <- gets $ globClasses.sstGlob
     cid <- case classes !!! (expCid exeFn) of
         ClassFun fnSgn -> do
+            checkArgTypes (mthArgs fnSgn) argCidTuples
             case mthRetType fnSgn of
                 Nothing -> return $ stdClss M.! "Void"
                 Just cid -> return cid
@@ -1507,18 +1515,58 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                          "of type `" ++ clsName ++ "', which is not a function")
     return $ RValue cid $ mkExe $ \kv -> do
         execRValue exeFn $ \(ValFunction fnImpl) -> do
-            exec (funBody fnImpl argTuples) kv
+            exec (funBody fnImpl argExeTuples) kv
     where
         argSem (FunCallArg_Positional argExpr) = do
-            exeArg <- liftM expRValue $ exprSem argExpr
-            return (Nothing, exeArg)
+            sem <- exprSem argExpr
+            return ((Nothing, expCid sem), (Nothing, expRValue sem))
         argSem (FunCallArg_Keyword (LowerIdent (_, name)) _ argExpr) = do
-            exeArg <- liftM expRValue $ exprSem argExpr
-            return (Just name, exeArg)
+            sem <- exprSem argExpr
+            return ((Just name, expCid sem), (Just name, expRValue sem))
         fstIsNothing = (== Nothing).fst
         unJustKwarg (Just name, exe) = return (name, exe)
         unJustKwarg (Nothing, _) = do
             throwAt pos "Positional arg after kwargs"
+        checkArgTypes argSgns argCidTuples = do
+            let expectedPargs = length $ dropWhile isOptional $ reverse argSgns
+                isOptional argSgn = (isJust $ argName argSgn) || (argHasDefault argSgn)
+                (pargs, kwargs) = span (isNothing.fst) argCidTuples
+                kwargsSgns = drop (length pargs) argSgns
+                kwargsSgnsMap = M.fromList $ flip mapMaybe kwargsSgns $ \as -> do
+                    case argName as of
+                        Just name -> Just (name, (argType as, argHasDefault as))
+                        Nothing -> Nothing
+            when (expectedPargs > length pargs) $ do
+                throwAt pos ("This function expects at least " ++
+                             (show expectedPargs) ++ " positional arguments, but " ++
+                             (show $ length pargs) ++ " supplied")
+            forM_ (zip pargs argSgns) $ \((_, cid), argSgn) -> do
+                typeOk <- isSubclass cid $ argType argSgn
+                when (not typeOk) $ do
+                    throwBadArg (argType argSgn) cid
+            unboundArgs <- foldM applyKwarg kwargsSgnsMap kwargs
+            let unboundArgsWOdefault = filter (snd.snd) $ M.toList unboundArgs
+            when (not $ null unboundArgsWOdefault) $ do
+                let (name, _) = head unboundArgsWOdefault
+                throwAt pos $ "No value for argument `" ++ name ++ "'"
+        applyKwarg sgnsMap (mName, actualCid) = do
+            let name = fromJust mName
+            case M.lookup name sgnsMap of
+                Just (expectedCid, _) -> do
+                    typeOk <- isSubclass actualCid $ expectedCid
+                    when (not typeOk) $ do
+                        throwBadArg expectedCid actualCid
+                    return $ M.delete name sgnsMap
+                Nothing -> do
+                    throwAt pos ("Function `" ++ (printTree expr) ++ "' does not " ++
+                                 "have argument named `" ++ name ++ "'")
+        throwBadArg expectedCid actualCid = do
+            classes <- gets $ globClasses.sstGlob
+            let expectedCls = classes !!! expectedCid
+                actualCls = classes !!! actualCid
+            throwAt pos ("Expression`" ++ (printTree expr) ++
+                        "' of type `" ++ (className actualCls) ++ "' found, " ++
+                        (className expectedCls) ++ "' expected")
 
 exprSem (Expr_Parens _ [expr]) = exprSem expr
 
@@ -1621,6 +1669,7 @@ argsToVars args argDefPoss = M.fromList $ do
             return $ (name, VarType {
                 varMutable=True,
                 varClass=cid,
+                varStatic=False,
                 varDefPos=argDefPoss !!! name
             })
         ArgSgn Nothing _ _ -> []
@@ -1668,7 +1717,6 @@ mkCall fnSgn defArgs exeBody closureFid argTuples = do
             (exec exeBody $ const $ doReturn ValNull) re $ mem{memFid=fid}
 
         in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
-        -- TODO: statycznie wymusic wywolanie return w funkcji, "prawdziwe" lub sztuczne
 
 
 intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> TCM ExprSem
@@ -1704,8 +1752,25 @@ isSubclass subCid superCid = do
             ClassDesc {} -> case superCls of
                 ClassDesc {} -> do
                     return $ S.member superCid $ classAllSupers subCls
-                ClassFun _ -> notYet "Function inheritance"
-            ClassFun _ -> notYet "Function inheritance"
+                ClassFun _ -> return False
+            ClassFun subSgn -> case superCls of
+                ClassDesc {} -> return False
+                ClassFun supSgn -> do
+                    let supArgs = mthArgs supSgn
+                        subArgs = mthArgs subSgn
+                    if (length supArgs) == (length subArgs) then do
+                        liftM (all id) $ mapM argOk $ zip supArgs subArgs
+                    else do
+                        return False
+    where
+        argOk sgns = liftM2 (&&) (nameOk sgns) (classOk sgns)
+        nameOk (supAS, subAS) = do
+            case argName supAS of
+                Just supName -> case argName subAS of
+                    Just subName -> return $ supName == subName
+                    Nothing -> return False
+                Nothing -> return True
+        classOk (supAS, subAS) = isSubclass (argType supAS) (argType subAS)
 
 closeSuperClss :: S.Set Cid -> TCM (S.Set Cid)
 closeSuperClss directSupers = do

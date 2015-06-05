@@ -1,17 +1,43 @@
-class List():
+class Nillable():
     Bool isNil
+
+class List(Nillable):
+    pass
+
+class RootedTree(Nillable):
+    pass
+
+class BinTree(RootedTree):
+    pass
 
 struct Cons():
     Int head
-    Cons tail
-
-class Tree():
-    Bool isNil
+    List tail
+    Bool isNil:
+        get:
+            return false
+    implement List:
+        pass
 
 struct Nil():
-    pass
+    Bool isNil:
+        get:
+            return true
+    implement Nillable:
+        pass
+    implement List:
+        pass
+    implement BinTree:
+        pass
+
+let nil = Nil()
 
 struct Node():
     Int value
-    Tree left
-    Tree right
+    BinTree left
+    BinTree right
+    Bool isNil:
+        get:
+            return false
+    implement BinTree:
+        pass
