@@ -12,7 +12,9 @@ struct Impl():
             self.[wr_] = value
 
     implement Base:
-        pass
+        Int ro:
+            get:
+                return 1
 
 fn () -> Base:
     return Impl() as Base

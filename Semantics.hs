@@ -868,8 +868,38 @@ hoistImplDecl implCid propDecl@(InImpl_PropertyDefinition {}) impls = do
             notYetAt pos "auto getter"
     setter <- case maybeSet of
         MaybeSetClause_None -> return $ error "Read-only property"
-        MaybeSetClause_Some (PropDefClause_Def _bodyBlock) -> do
-            notYetAt pos "custom setter"
+        MaybeSetClause_Some (PropDefClause_Def bodyBlock) -> do
+            let setterSgn = FunSgn {
+                mthRetType=Nothing,
+                mthArgs=[ArgSgn {
+                    argName=Just "value",
+                    argType=cid,
+                    argHasDefault=False
+                }]
+            }
+--                          outerVars <- asks envVars
+            let makeInEnv outEnv = outEnv{
+                    envVars=M.fromList [
+                        ("self", VarType {
+                            varMutable=False,
+                            varClass=implCid,
+                            varDefPos=fpos
+                        }),
+                        ("value", VarType {
+                            varMutable=False,
+                            varClass=cid,
+                            varDefPos=fpos
+                        })
+                    ], -- M.union outerVars argVars,
+                    envExpectedReturnType=Just $ Nothing,
+                    envInsideLoop=False
+                }
+            exeBody <- local makeInEnv $ stmtBlockSem bodyBlock
+            return $ \pt val -> do
+                let callExe = mkCall setterSgn M.empty exeBody topLevelFid [
+                        (Just "self", mkExe $ \kv-> kv $ ValRef pt),
+                        (Just "value", mkExe $ \kv-> kv $ val)]
+                mkExe $ \ku -> exec callExe (\_ -> ku ())
         MaybeSetClause_Some PropDefClause_Auto -> do
             notYetAt pos "auto setter"
     let propImpl = PropImpl {
