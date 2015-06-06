@@ -1082,10 +1082,12 @@ stmtSem (Stmt_While condExpr block) = do
     return $ fix $ \exeLoop -> do
         mkExe $ \k re -> do
             let popRe re'' = re''{
+                reReturn=reReturn re,
                 reBreak=reBreak re,
                 reContinue=reContinue re
             }
             let re' = re{
+                reReturn=(\val -> (reReturn re val).popRe),
                 reBreak=(k ()).popRe,
                 reContinue=(exec exeLoop k).popRe
             }
@@ -1177,6 +1179,56 @@ stmtSem Stmt_Memdump = do
     return $ mkExe $ \k re mem -> do
         hPutStrLn stderr $ show mem
         k () re mem
+
+stmtSem (Stmt_Case expr caseClauses) = do
+    eexe <- exprSem expr
+    clausesExe <- foldM addClause ((\ku _ -> ku ()) :: (() -> Cont) -> VarVal -> Cont) (reverse caseClauses)
+    return $ mkExe $ \ku -> do
+        execRValue eexe $ clausesExe ku
+    where
+        addClause :: ((() -> Cont) -> VarVal -> Cont) -> CaseClause -> TCM ((() -> Cont) -> VarVal -> Cont)
+        addClause acc (CaseClause_Named typeExpr (LowerIdent (pos, name)) bodyBlock) = do
+            env <- ask
+            cid <- typeExprCid typeExpr
+            innerEnv <- case M.lookup name $ envVars env of
+                Just var -> do
+                    throwAt pos (
+                        "variable redefined: `" ++ name ++ "'\n" ++
+                        (showPos $ varDefPos var) ++ ": Previously defined here")
+                Nothing -> do
+                    fpos <- completePos pos
+                    let var = VarType False cid False fpos
+                    return $ env {
+                        envVars=M.insert name var $ envVars env
+                    }
+            bodyExe <- local (const innerEnv) $ stmtBlockSem bodyBlock
+            return $ \ku val -> do
+                runtimeClassCheck cid val $ \is re mem -> do
+                    let _ = (mem :: Memory)
+                    if is then do
+                        let doPop k re' mem' = do
+                            k (re'{
+                                    reReturn=reReturn re,
+                                    reBreak=reBreak re,
+                                    reContinue=reContinue re
+                                }) (mem'{memFid=memFid mem})
+                        let re' = re {
+                                    reReturn=doPop.(reReturn re),
+                                    reBreak=doPop $ reBreak re,
+                                    reContinue=doPop $ reContinue re
+                                }
+                            (fid, mem') = allocFrame (memFid mem) mem
+                            ku' = const $ doPop (ku ())
+                        exec bodyExe ku' re' (allocVar name val $ setFid fid mem')
+                     else do
+                        acc ku val re mem
+        addClause acc (CaseClause_Unnamed typeExprs bodyBlock) = do
+            cids <- mapM typeExprCid typeExprs
+            when ((length cids) > 1) $ notYet "Multiple classes in case clause"
+            bodyExe <- stmtBlockSem bodyBlock
+            return $ \ku val ->
+                runtimeClassCheck (head cids) val $ \is ->
+                    if is then exec bodyExe ku else acc ku val
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
@@ -1587,23 +1639,10 @@ exprSem (Expr_Is expr typeExpr) = do
             notYet "Expr_Is for function types"
         ClassDesc {} -> return ()
     return $ RValue (stdClss M.! "Bool") $ mkExe $ \kv -> do
-        execRValue exee $ \val re mem -> do
-            let is = case val of
-                    ValNull -> False
-                    ValRef pt -> do
-                        let sid = objSid $ memObjAt mem pt
-                            strCid = structCid $ (reStructs re) !!! sid
-                            supers = classAllSupers $ (reClasses re) !!! strCid
-                        (cid == strCid) || (S.member cid supers)
-                    ValFunction _ -> False
-                    ValBool _ -> cid == (stdClss M.! "Bool")
-                    ValInt _ -> cid == (stdClss M.! "Int")
-                    ValChar _ -> cid == (stdClss M.! "Char")
-            kv (ValBool is) re mem
+        execRValue exee $ \val -> do
+            runtimeClassCheck cid val (kv.ValBool)
 
 exprSem expr = notYet $ printTree expr
-
-
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 --                                    __  _ __                                --
@@ -1712,6 +1751,21 @@ argsToVars args argDefPoss = M.fromList $ do
                 varDefPos=argDefPoss !!! name
             })
         ArgSgn Nothing _ _ -> []
+
+runtimeClassCheck :: Cid -> VarVal -> SemiCont Bool
+runtimeClassCheck cid val kb re mem = do
+    let is = case val of
+            ValNull -> False
+            ValRef pt -> do
+                let sid = objSid $ memObjAt mem pt
+                    strCid = structCid $ (reStructs re) !!! sid
+                    supers = classAllSupers $ (reClasses re) !!! strCid
+                (cid == strCid) || (S.member cid supers)
+            ValFunction _ -> False
+            ValBool _ -> cid == (stdClss M.! "Bool")
+            ValInt _ -> cid == (stdClss M.! "Int")
+            ValChar _ -> cid == (stdClss M.! "Char")
+    kb is re mem
 
 mkCall :: FunSgn -> M.Map VarName (Exe VarVal) -> Exe () -> Fid ->
     [(Maybe VarName, Exe VarVal)] -> Exe VarVal

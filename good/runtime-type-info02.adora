@@ -1,16 +1,52 @@
-case 1 of:
+case 1:
     Int:
         print 1
     Bool:
         print 2
 
-case true of:
+case true:
     Int:
         print 1
     Bool:
         print 2
 
+
+class Either:
+    pass
+
+struct Left:
+    Int left
+    Int left:
+        get:
+            return self.[left]
+    implement Either:
+        pass
+
+struct Right:
+    Bool right
+    Bool right:
+        get:
+            return self.[right]
+    implement Either:
+        pass
+
+let printEither = fn (Either e):
+    case e:
+        Left l: print l.left
+        Right r: print r.right
+
+print
+
+printEither(Left(1))
+printEither(Left(2))
+printEither(Right(true))
+printEither(Right(false))
 
 # EXPECTED OUTPUT #
 # 1
 # 2
+#
+# 1
+# 2
+# true
+# false

@@ -150,7 +150,7 @@ Stmt_ReturnValue.   Stmt ::= Tok_Return Expr ;
 Stmt_If.            Stmt ::= Tok_If Expr StatementBlock ;
 Stmt_Elif.          Stmt ::= Tok_Elif Expr StatementBlock ;
 Stmt_Else.          Stmt ::= Tok_Else StatementBlock ;
-Stmt_Case.          Stmt ::= "case" Expr "of" ":" "{" [CaseClause] "}";
+Stmt_Case.          Stmt ::= "case" Expr ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 Stmt_For.           Stmt ::= "for" LowerIdent Tok_Assign Expr "then" Expr StatementBlock ;
@@ -164,6 +164,7 @@ Stmt_Memdump.       Stmt ::= "dumpmem" ;
 Stmt_Pass.          Stmt ::= "pass" ;
 
 separator CaseClause ";" ;
+CaseClause_Named.    CaseClause ::= Expr9 LowerIdent StatementBlock ;
 CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
 
 -- -- --

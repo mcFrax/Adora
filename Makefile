@@ -48,7 +48,7 @@ adora.html: adora.md github.css
 	pandoc -s -S "$<" -o "$@" --css=github.css --self-contained --highlight-style=kate
 
 $(BnfcFiles): $(Langname).cf
-	bnfc -haskell adora.cf >/dev/null
+	bnfc -haskell adora.cf >/dev/null || bnfc -haskell adora.cf 1>&2
 	touch $(BnfcFiles)  # tell `make` these files are up to date
 
 define ZipFiles
