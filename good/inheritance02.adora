@@ -22,7 +22,7 @@ struct Impl():
                 return 1
 
 fn () -> Base:
-    return Impl() as Base
+    return Impl(wr_=1) as Base
 
 fn () -> Derived:
-    return Impl() as Derived
+    return Impl(wr_=1) as Derived

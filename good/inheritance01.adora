@@ -17,4 +17,4 @@ struct Impl():
                 return 1
 
 fn () -> Base:
-    return Impl() as Base
+    return Impl(wr_=1) as Base

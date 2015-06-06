@@ -1,4 +1,4 @@
-# brak argumentu przy wywołaniu
+# brak argumentu pozycyjnego przy wywołaniu
 
 (fn (Int _):
         pass

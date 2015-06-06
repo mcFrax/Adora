@@ -1,0 +1,9 @@
+# argument pozycyjny po nazwanym
+
+let f = fn (Int a, Int b):
+    pass
+
+f(a=1, 2)
+
+# EXPECTED COMPILATION ERROR #
+# bad/function-call03.adora:6:2: error: Non-keyword arg after keyword arg

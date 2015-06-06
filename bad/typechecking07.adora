@@ -1,0 +1,7 @@
+# argument pozycyjny po argumencie opcjonalnym w definicji funkcji
+
+fn (Int x = 1, Int _):
+    pass
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking07.adora:3:20: error: Non-default argument follows default argument

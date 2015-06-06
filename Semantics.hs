@@ -24,7 +24,7 @@ import StdLib
 trace :: Show a => String -> a -> b -> b
 trace pref trac val = Debug.Trace.trace (pref ++ (show trac)) val
 
-#define TRACE(x) (trace (__FILE__ ++ ":" ++ (show (__LINE__ :: Int))) (x) $ seq (x) $ return ())
+#define TRACE(x) (trace (__FILE__ ++ ":" ++ (show (__LINE__ :: Int)) ++ " ") (x) $ seq (x) $ return ())
 
 
 data SemState = SemState {
@@ -1499,13 +1499,16 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
     exeFn <- exprSem expr
     (argCidTuples, argExeTuples) <- liftM unzip $ mapM argSem args
     kwargs <- mapM unJustKwarg $ dropWhile fstIsNothing argExeTuples
-    let kwargsSet = foldl (\s (n, _) -> S.insert n s) S.empty kwargs
-    when ((S.size kwargsSet) /= (length kwargs)) $ do
-        throwAt pos "Kwarg names not unique"
+    argNamesSet <- foldM (\set (name, _) -> do
+            if S.member name set then do
+                throwAt pos ("Conflictiong values for argument `" ++ name ++ "'")
+            else do
+                return $ S.insert name set
+        ) S.empty kwargs
     classes <- gets $ globClasses.sstGlob
     cid <- case classes !!! (expCid exeFn) of
         ClassFun fnSgn -> do
-            checkArgTypes (mthArgs fnSgn) argCidTuples
+            checkArgTypes argNamesSet (mthArgs fnSgn) argCidTuples
             case mthRetType fnSgn of
                 Nothing -> return $ stdClss M.! "Void"
                 Just cid -> return cid
@@ -1526,8 +1529,8 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
         fstIsNothing = (== Nothing).fst
         unJustKwarg (Just name, exe) = return (name, exe)
         unJustKwarg (Nothing, _) = do
-            throwAt pos "Positional arg after kwargs"
-        checkArgTypes argSgns argCidTuples = do
+            throwAt pos "Non-keyword arg after keyword arg"
+        checkArgTypes argNamesSet argSgns argCidTuples = do
             let expectedPargs = length $ dropWhile isOptional $ reverse argSgns
                 isOptional argSgn = (isJust $ argName argSgn) || (argHasDefault argSgn)
                 (pargs, kwargs) = span (isNothing.fst) argCidTuples
@@ -1544,12 +1547,12 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                 typeOk <- isSubclass cid $ argType argSgn
                 when (not typeOk) $ do
                     throwBadArg (argType argSgn) cid
-            unboundArgs <- foldM applyKwarg kwargsSgnsMap kwargs
-            let unboundArgsWOdefault = filter (snd.snd) $ M.toList unboundArgs
+            unboundArgs <- foldM (applyKwarg argNamesSet) kwargsSgnsMap kwargs
+            let unboundArgsWOdefault = filter (not.snd.snd) $ M.toList unboundArgs
             when (not $ null unboundArgsWOdefault) $ do
                 let (name, _) = head unboundArgsWOdefault
                 throwAt pos $ "No value for argument `" ++ name ++ "'"
-        applyKwarg sgnsMap (mName, actualCid) = do
+        applyKwarg argNamesSet sgnsMap (mName, actualCid) = do
             let name = fromJust mName
             case M.lookup name sgnsMap of
                 Just (expectedCid, _) -> do
@@ -1558,8 +1561,11 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                         throwBadArg expectedCid actualCid
                     return $ M.delete name sgnsMap
                 Nothing -> do
-                    throwAt pos ("Function `" ++ (printTree expr) ++ "' does not " ++
-                                 "have argument named `" ++ name ++ "'")
+                    if S.member name argNamesSet  then do
+                        throwAt pos ("Conflictiong values for argument `" ++ name ++ "'")
+                    else do
+                        throwAt pos ("Function `" ++ (printTree expr) ++ "' does not " ++
+                                    "have argument named `" ++ name ++ "'")
         throwBadArg expectedCid actualCid = do
             classes <- gets $ globClasses.sstGlob
             let expectedCls = classes !!! expectedCid
@@ -1592,6 +1598,7 @@ fHeaderSem :: FHeader -> DefaultsHandling
     -> TCM (FunSgn, M.Map VarName (Exe VarVal), M.Map VarName CodePosition)
 fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
     argTuples <- mapM argSem args
+    foldM_ checkNonDefaults True argTuples
     retType <- case optResType of
         OptResultType_None -> return Nothing
         OptResultType_Some typeExpr -> do
@@ -1634,6 +1641,15 @@ fHeaderSem (FHeader_ _ args optResType) defaultsHandling = do
         argToMap m (_, Nothing, _) = m
         argToMap m (ArgSgn{argName=Just name}, Just exe, _) = M.insert name exe m
         argToMap _ _ = error "argToMap: default value for unnamed argument"
+        checkNonDefaults posArgAllowed (argSgn, _, dp) = do
+            if (not $ argHasDefault argSgn) then  -- positional argument
+                if not posArgAllowed then do
+                    throwError $ Err dp ErrOther (
+                        "Non-default argument follows default argument")
+                else do
+                    return True
+            else
+                return False
 
 fSignatureSem :: FSignature -> TCM (FunSgn, M.Map VarName CodePosition)
 fSignatureSem (FSignature_ _ args optResType) = do

@@ -139,5 +139,5 @@ if successcount == testcount:
     print "All tests passed (" + testratio + ")\nOK"
 else:
     sys.stderr.write("tests passed: " + testratio + "\n");
-    sys.stderr.write(str(testcount - successcount) + " tests failed\nFAILED");
+    sys.stderr.write(str(testcount - successcount) + " tests failed\nFAILED\n");
     sys.exit(1)

@@ -1,0 +1,8 @@
+# brak argumentu przy wywołaniu
+
+(fn (Int a, Int b):
+        pass
+    )(b=1)
+
+# EXPECTED COMPILATION ERROR #
+# bad/typechecking08.adora:5:6: error: No value for argument `a'
