@@ -28,6 +28,12 @@ position token Tok_Null 'n''u''l''l' ;
 position token Tok_LP '(' ;
 position token Tok_LB '[' ;
 position token Tok_Assign '=' ;
+position token Tok_Minus '-' ;
+position token Tok_Plus '+' ;
+position token Tok_Asterisk '*' ;
+position token Tok_Slash '/' ;
+position token Tok_DoubSlash '/''/' ;
+position token Tok_Percent '%' ;
 position token ModifyOper ( '+' | '-' | '*' | '/' | '/''/' ) '=' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
 position token UpperIdent (upper (letter | digit | '_')*) ;
@@ -207,18 +213,17 @@ RelOper_Gt.  RelOper ::= ">" ;
 RelOper_Gte. RelOper ::= ">=" ;
 
 _.              Expr6 ::= Expr7 ;
-Expr_Add.       Expr6 ::= Expr6 "+" Expr7 ;
-Expr_Sub.       Expr6 ::= Expr6 "-" Expr7 ;
+Expr_Add.       Expr6 ::= Expr6 Tok_Plus Expr7 ;
+Expr_Sub.       Expr6 ::= Expr6 Tok_Minus Expr7 ;
 
 _.              Expr7 ::= Expr8 ;
-Expr_Mul.       Expr7 ::= Expr7 "*" Expr8 ;
-Expr_Div.       Expr7 ::= Expr7 "/" Expr8 ;
-Expr_IntDiv.    Expr7 ::= Expr7 "//" Expr8 ;
-Expr_Mod.       Expr7 ::= Expr7 "%" Expr8 ;
+Expr_Mul.       Expr7 ::= Expr7 Tok_Asterisk Expr8 ;
+Expr_Div.       Expr7 ::= Expr7 Tok_Slash Expr8 ;
+Expr_IntDiv.    Expr7 ::= Expr7 Tok_DoubSlash Expr8 ;
+Expr_Mod.       Expr7 ::= Expr7 Tok_Percent Expr8 ;
 
 _.              Expr8 ::= Expr9 ;
-Expr_Minus.     Expr8 ::= "-" Expr8 ;
--- Expr_Plus.      Expr8 ::= "+" Expr8 ;
+Expr_Minus.     Expr8 ::= Tok_Minus Expr8 ;
 
 _.              Expr9 ::= Expr10 ;
 Expr_As.      Expr9 ::= Expr10 Tok_As Expr10 ;

@@ -1228,7 +1228,10 @@ stmtSem (Stmt_Case expr caseClauses) = do
             bodyExe <- stmtBlockSem bodyBlock
             return $ \ku val ->
                 runtimeClassCheck (head cids) val $ \is ->
-                    if is then exec bodyExe ku else acc ku val
+                    if is then do
+                        exec bodyExe ku
+                    else do
+                        acc ku val
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";
@@ -1293,8 +1296,8 @@ typeExprCid expr = do
 deduceType :: Expr -> TCM Cid
 deduceType (Expr_Char _) = return (stdClss M.! "Char")
 -- deduceType (Expr_String c) _ =
--- deduceType (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
 deduceType (Expr_Int _) = return (stdClss M.! "Int")
+deduceType (Expr_Double _) = return (stdClss M.! "Double")
 -- deduceType (Expr_Tuple _) _ = ???
 -- deduceType (Expr_Array _) _ = ???
 deduceType (Expr_Var (LowerIdent (pos, varName))) = do
@@ -1306,13 +1309,16 @@ deduceType (Expr_Var (LowerIdent (pos, varName))) = do
 deduceType (Expr_Not _) = return (stdClss M.! "Bool")
 deduceType (Expr_RelOper {}) = return (stdClss M.! "Bool")
 
-deduceType (Expr_Add {}) = return (stdClss M.! "Int")
-deduceType (Expr_Sub {}) = return (stdClss M.! "Int")
-deduceType (Expr_Mul {}) = return (stdClss M.! "Int")
--- deduceType (Expr_Div {}) = ??? / {}
+deduceType (Expr_Add exp1 (Tok_Plus (pos, _)) exp2) = deduceTypeNumBinOp pos exp1 exp2
+deduceType (Expr_Sub exp1 (Tok_Minus (pos, _)) exp2) = deduceTypeNumBinOp pos exp1 exp2
+deduceType (Expr_Mul exp1 (Tok_Asterisk (pos, _)) exp2) = deduceTypeNumBinOp pos exp1 exp2
+deduceType (Expr_Div {}) = return (stdClss M.! "Double")
 deduceType (Expr_IntDiv {}) = return (stdClss M.! "Int")
 deduceType (Expr_Mod {}) = return (stdClss M.! "Int")
-deduceType (Expr_Minus expr) = deduceType expr
+deduceType (Expr_Minus (Tok_Minus (pos, _)) expr) = do
+    cid <- deduceType expr
+    _ <- whatNum pos cid True  -- asserts it IS numeric type
+    return cid
 
 deduceType (Expr_Lambda _ signature _) = do
     (fnSgn, _, _) <- fHeaderSem signature AcceptDefaults
@@ -1370,6 +1376,13 @@ deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
 getCls :: Cid -> TCM ClassDesc
 getCls cid = gets $ (!!! cid).globClasses.sstGlob
 
+deduceTypeNumBinOp :: (Int, Int) -> Expr -> Expr -> TCM Cid
+deduceTypeNumBinOp pos exp1 exp2 = do
+    cid1 <- deduceType exp1
+    cid2 <- deduceType exp2
+    let f True True = (stdClss M.! "Int")
+        f _ _ = (stdClss M.! "Double")
+    liftM2 f (whatNum pos cid1 True) (whatNum pos cid2 True)
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 --                                 _____                                      --
@@ -1382,10 +1395,13 @@ getCls cid = gets $ (!!! cid).globClasses.sstGlob
 
 
 exprSem :: Expr -> TCM ExprSem
-exprSem (Expr_Char c) = return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
+exprSem (Expr_Char c) = do
+    return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
 -- exprSem (Expr_String c) _ =
--- exprSem (Expr_Double d) _ = liftM RValue $ return $ ValDouble d
-exprSem (Expr_Int i) = return $ RValue (stdClss M.! "Int") $ mkExe ($ ValInt $ fromInteger i)
+exprSem (Expr_Int i) = do
+    return $ RValue (stdClss M.! "Int") $ mkExe ($ ValInt $ fromInteger i)
+exprSem (Expr_Double d) = do
+    return $ RValue (stdClss M.! "Double") $ mkExe ($ ValDouble $ d)
 -- exprSem (Expr_Tuple _) _ = ???
 -- exprSem (Expr_Array _) _ = ???
 exprSem (Expr_Var (LowerIdent (pos, varName))) = do
@@ -1457,17 +1473,33 @@ exprSem expr@(Expr_RelOper {}) = do
             return $ mkExe $ \kmv -> do
                 execRValue exee $ \v -> kmv $ Just v
 
-exprSem (Expr_Add exp1 exp2) = intBinopSem (+) exp1 exp2
-exprSem (Expr_Sub exp1 exp2) = intBinopSem (-) exp1 exp2
-exprSem (Expr_Mul exp1 exp2) = intBinopSem (*) exp1 exp2
--- exprSem (Expr_Div exp1 exp2) = ??? / exp1 exp2
-exprSem (Expr_IntDiv exp1 exp2) = intBinopSem div exp1 exp2
-exprSem (Expr_Mod exp1 exp2) = intBinopSem mod exp1 exp2
-exprSem (Expr_Minus expr) = do
+exprSem (Expr_Add exp1 (Tok_Plus (pos, _)) exp2) = do
+    numBinopSem pos (+) (+) exp1 exp2
+
+exprSem (Expr_Sub exp1 (Tok_Minus (pos, _)) exp2) = do
+    numBinopSem pos (-) (-) exp1 exp2
+
+exprSem (Expr_Mul exp1 (Tok_Asterisk (pos, _)) exp2) = do
+    numBinopSem pos (*) (*) exp1 exp2
+
+exprSem (Expr_Div exp1 (Tok_Slash (pos, _)) exp2) = do
+    doubleBinopSem pos (/) exp1 exp2
+
+exprSem (Expr_IntDiv exp1 (Tok_DoubSlash (pos, _)) exp2) = do
+    intBinopSem pos div exp1 exp2
+
+exprSem (Expr_Mod exp1 (Tok_Percent (pos, _)) exp2) = do
+    intBinopSem pos mod exp1 exp2
+
+exprSem (Expr_Minus (Tok_Minus (pos, _)) expr) = do
     exee <- exprSem expr
+    let cid = expCid exee
+        ff True = (ValInt).negate.asInt
+        ff False = (ValDouble).negate.toDouble
+    f <- liftM ff (whatNum pos cid True)
     return $ RValue (expCid exee) $ mkExe $ \ke -> do
-        execRValue exee $ \(ValInt val) re mem -> do
-            ke (ValInt $ 0 - val) re mem
+        execRValue exee $ \val re mem -> do
+            ke (f val) re mem
 
 exprSem (Expr_Lambda (Tok_Fn (_pos, _)) signature bodyBlock) = do
     (fnSgn, defArgs, argDefPoss) <- fHeaderSem signature CompileDefaults
@@ -1764,6 +1796,7 @@ runtimeClassCheck cid val kb re mem = do
             ValFunction _ -> False
             ValBool _ -> cid == (stdClss M.! "Bool")
             ValInt _ -> cid == (stdClss M.! "Int")
+            ValDouble _ -> cid == (stdClss M.! "Double")
             ValChar _ -> cid == (stdClss M.! "Char")
     kb is re mem
 
@@ -1811,15 +1844,46 @@ mkCall fnSgn defArgs exeBody closureFid argTuples = do
 
         in (exec exeArgs $ const $ exec exeDefArgs $ const bodyCont) re1 mem1
 
-
-intBinopSem :: (Int -> Int -> Int) -> Expr -> Expr -> TCM ExprSem
-intBinopSem op exp1 exp2 = do
+numBinopSem :: (Int, Int) -> (Int -> Int -> Int) -> (Double -> Double -> Double) ->
+    Expr -> Expr -> TCM ExprSem
+numBinopSem pos iop dop exp1 exp2 = do
     e1exe <- exprSem exp1
     e2exe <- exprSem exp2
+    let getFun True True = do
+            ((stdClss M.! "Int"),
+             \i1 i2 -> ValInt $ (asInt i1) `iop` (asInt i2))
+        getFun _ _ = do
+            ((stdClss M.! "Double"),
+             \num1 num2 -> ValDouble $ (toDouble num1) `dop` (toDouble num2))
+    (cid, f) <- liftM2 getFun
+                        (whatNum pos (expCid e1exe) True)
+                        (whatNum pos (expCid e2exe) True)
+    return $ RValue cid $ mkExe $ \ke -> do
+        execRValue e1exe $ \v1 -> do
+            execRValue e2exe $ \v2 -> do
+                ke $ f v1 v2
+
+intBinopSem :: (Int, Int) -> (Int -> Int -> Int) -> Expr -> Expr -> TCM ExprSem
+intBinopSem pos op exp1 exp2 = do
+    e1exe <- exprSem exp1
+    e2exe <- exprSem exp2
+    _ <- whatNum pos (expCid e1exe) False
+    _ <- whatNum pos (expCid e2exe) False
     return $ RValue (stdClss M.! "Int") $ mkExe $ \ke -> do
         execRValue e1exe $ \(ValInt v1) -> do
             execRValue e2exe $ \(ValInt v2) -> do
                 ke $ ValInt $ op v1 v2
+
+doubleBinopSem :: (Int, Int) -> (Double -> Double -> Double) -> Expr -> Expr -> TCM ExprSem
+doubleBinopSem pos op exp1 exp2 = do
+    e1exe <- exprSem exp1
+    e2exe <- exprSem exp2
+    _ <- whatNum pos (expCid e1exe) True
+    _ <- whatNum pos (expCid e2exe) True
+    return $ RValue (stdClss M.! "Double") $ mkExe $ \ke -> do
+        execRValue e1exe $ \v1 -> do
+            execRValue e2exe $ \v2 -> do
+                ke $ ValDouble $ op (toDouble v1) (toDouble v2)
 
 assertTmplSgnEmpty :: MaybeTemplateSgn -> TCM ()
 assertTmplSgnEmpty mTmplSgn =
@@ -1881,3 +1945,18 @@ closeSuperClss directSupers = do
                 closeSuperClss' acc' nextLevelSet'
 
     closeSuperClss' S.empty directSupers
+
+whatNum :: (Int, Int) -> Cid -> Bool -> TCM Bool
+whatNum pos cid acceptDouble = do
+    if cid == (stdClss M.! "Int") then do
+        return True
+    else if acceptDouble && (cid == (stdClss M.! "Double")) then do
+        return False
+    else do
+        clsName <- gets $ className.(!!! cid).globClasses.sstGlob
+        throwAt pos ("`" ++ clsName ++ "' is not a number type")
+
+toDouble :: VarVal -> Double
+toDouble (ValDouble d) = d
+toDouble (ValInt i) = fromInteger $ toInteger i
+toDouble err = error $ "toDouble called on " ++ (show err)

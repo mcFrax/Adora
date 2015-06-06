@@ -146,6 +146,7 @@ data VarVal = ValNull
            | ValFunction FunImpl
            | ValBool { asBool :: Bool }
            | ValInt { asInt :: Int }
+           | ValDouble { asDouble :: Double }
            | ValChar { asChar :: Char }
 
 instance Show VarVal where
@@ -154,6 +155,7 @@ instance Show VarVal where
     show (ValFunction _) = "<function object>"
     show (ValBool b) = if b then "true" else "false"
     show (ValInt i) = show i
+    show (ValDouble d) = show d
     show (ValChar c) = show c
 
 instance NFData VarVal where
@@ -162,6 +164,7 @@ instance NFData VarVal where
     rnf (ValFunction _) = ()
     rnf (ValBool b) = rnf b
     rnf (ValInt i) = rnf i
+    rnf (ValDouble d) = rnf d
     rnf (ValChar c) = rnf c
 
 
@@ -172,6 +175,8 @@ isTruthy (ValFunction _) = True
 isTruthy (ValBool val) = val
 isTruthy (ValInt 0) = False
 isTruthy (ValInt _) = True
+isTruthy (ValDouble 0) = False
+isTruthy (ValDouble _) = True
 isTruthy (ValChar '\0') = False
 isTruthy (ValChar _) = True
 
