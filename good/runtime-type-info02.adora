@@ -1,0 +1,16 @@
+case 1 of:
+    Int:
+        print 1
+    Bool:
+        print 2
+
+case true of:
+    Int:
+        print 1
+    Bool:
+        print 2
+
+
+# EXPECTED OUTPUT #
+# 1
+# 2

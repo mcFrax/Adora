@@ -1,4 +1,4 @@
-var c = Cons(1, Nil()) # Cons i Nil są z stdlib.adora
+var c = Cons(1, Nil())  # Cons i Nil są z stdlib.adora
 
 let f = fn () -> Cons:
     return c

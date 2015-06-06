@@ -26,7 +26,7 @@ position token Tok_Print 'p''r''i''n''t' ;
 position token Tok_Return 'r''e''t''u''r''n' ;
 position token Tok_Null 'n''u''l''l' ;
 position token Tok_LP '(' ;
-position token Tok_LTP '<''!' ;
+position token Tok_LB '[' ;
 position token Tok_Assign '=' ;
 position token ModifyOper ( '+' | '-' | '*' | '/' | '/''/' ) '=' ;
 position token LowerIdent ((lower | '_') (letter | digit | '_')*) ;
@@ -113,7 +113,7 @@ MaybeDefaultVal_Some. MaybeDefaultVal ::= Tok_Assign Expr ;
 
 -- Sgn == Signature
 MaybeTemplateSgn_None.  MaybeTemplateSgn ::= ;
-MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= Tok_LTP [TypeParamDef] "!>" ;
+MaybeTemplateSgn_Some.  MaybeTemplateSgn ::= Tok_LB [TypeParamDef] "]" ;
 
 separator TypeParamDef "," ;
 TypeParamDef_.  TypeParamDef ::= DollarIdent MaybeSuperclasses MaybeSubclasses ;
@@ -150,7 +150,7 @@ Stmt_ReturnValue.   Stmt ::= Tok_Return Expr ;
 Stmt_If.            Stmt ::= Tok_If Expr StatementBlock ;
 Stmt_Elif.          Stmt ::= Tok_Elif Expr StatementBlock ;
 Stmt_Else.          Stmt ::= Tok_Else StatementBlock ;
-Stmt_Case.          Stmt ::= "case" Expr "class" "of" ":" "{" [CaseClause] "}";
+Stmt_Case.          Stmt ::= "case" Expr "of" ":" "{" [CaseClause] "}";
 Stmt_While.         Stmt ::= "while" Expr  StatementBlock ;
 Stmt_ForIn.         Stmt ::= "for" LowerIdent "in" Expr StatementBlock ;
 Stmt_For.           Stmt ::= "for" LowerIdent Tok_Assign Expr "then" Expr StatementBlock ;
@@ -163,7 +163,7 @@ Stmt_PrintValues.   Stmt ::= Tok_Print [Expr] ;
 Stmt_Memdump.       Stmt ::= "dumpmem" ;
 Stmt_Pass.          Stmt ::= "pass" ;
 
-separator CaseClause "" ;
+separator CaseClause ";" ;
 CaseClause_Unnamed.  CaseClause ::= [Expr9] StatementBlock ;
 
 -- -- --
@@ -225,12 +225,11 @@ Expr_Is.        Expr9 ::= Expr10 "is" Expr10 ;  -- isinstance
 Expr_FnType.    Expr9 ::= FSignature ;
 
 _.              Expr10 ::= Expr11 ;
-Expr_Index.     Expr10 ::= Expr10 "[" Expr "]" ;
-Expr_Attr.      Expr10 ::= Expr10 "." "[" LowerIdent "]" ;  -- direct access to struct fields
+Expr_Brackets.  Expr10 ::= Expr10 Tok_LB [Expr] "]" ;  -- index or tmplt application
+Expr_Attr.      Expr10 ::= Expr10 "." Tok_LB LowerIdent "]" ;  -- direct access to struct fields
 Expr_Prop.      Expr10 ::= Expr10 "." LowerIdent;
 Expr_TupSubscr. Expr10 ::= Expr10 "." Integer ;  -- tuple subscript
 Expr_FunCall.   Expr10 ::= Expr10 Tok_LP [FunCallArg] ")" ;
-Expr_TmplAppl.  Expr10 ::= Expr10 Tok_LTP [Expr] "!>" ;
 Expr_NestedType.Expr10 ::= Expr10 "." UpperIdent ;
 
 separator FunCallArg "," ;
@@ -248,8 +247,8 @@ Expr_Var.       Expr11 ::= LowerIdent ;
 Expr_TypeName.  Expr11 ::= UpperIdent ;
 Expr_TypeVar.   Expr11 ::= DollarIdent ;
 
-LstVal_None.   LstVal ::= "[" "]" ;
-LstVal_Some.   LstVal ::= "[" [Expr] "]" ;
+LstVal_None.   LstVal ::= Tok_LB "]" ;
+LstVal_Some.   LstVal ::= Tok_LB [Expr] "]" ;
 
 Expr_Parens.   Expr12 ::= Tok_LP [Expr] ")" ;
 -- wspolny nieterminal dla wyrazenia w nawiasie i krotki

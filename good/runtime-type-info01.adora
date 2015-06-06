@@ -1,0 +1,26 @@
+print 1 is Int
+print 1 is Bool
+print true is Bool
+print true is Int
+print
+print Nil() is Nil
+print Nil() is BinTree
+print Nil() is List
+print (Nil() as BinTree) is Nil
+print (Nil() as BinTree) is List
+print
+print Nil() is Cons
+
+# EXPECTED OUTPUT #
+# true
+# false
+# true
+# false
+#
+# true
+# true
+# true
+# true
+# true
+#
+# false

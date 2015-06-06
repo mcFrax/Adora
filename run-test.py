@@ -40,6 +40,9 @@ def runTest(filename):
                     if line.startswith('# '):
                         expectations[current_section].append(line[2:])
                         return current_section
+                    elif line == '#\n':
+                        expectations[current_section].append('\n')
+                        return current_section
                     else:
                         return False
             current_section = process_line()

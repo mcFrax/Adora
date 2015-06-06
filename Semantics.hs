@@ -210,6 +210,7 @@ moduleSem (Module_ stmts) fileName = do
     let
         runEnv = RunEnv {
             reStructs=globStructs $ sstGlob sst,
+            reClasses=globClasses $ sstGlob sst,
             reReturn=error "return outside of function",
             reBreak=error "break outside a loop",
             reContinue=error "continue outside a loop"
@@ -1221,8 +1222,8 @@ typeExprSem (Expr_FnType sgnExpr@(FSignature_ _ _ _)) = do
     (fnSgn, _) <- fSignatureSem sgnExpr
     cid <- getFunctionCid fnSgn
     return $ ClsExpr cid
-typeExprSem (Expr_TmplAppl _ (Tok_LTP (pos, _)) _) = do
-    notYetAt pos "Expr_TmplAppl"
+typeExprSem (Expr_Brackets _ (Tok_LB (pos, _)) _) = do
+    notYetAt pos "Expr_Brackets as template application"
 typeExprSem (Expr_NestedType _ (UpperIdent (pos, _))) = do
     notYetAt pos "Expr_NestedType"
 typeExprSem (Expr_TypeVar (DollarIdent (pos, _))) = do
@@ -1273,7 +1274,7 @@ deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
             struct <- gets $ (!!! sid).globStructs.sstGlob
             getFunctionCid $ structCtorSgn struct
 
-deduceType (Expr_Attr expr (LowerIdent (pos, attrName))) = do
+deduceType (Expr_Attr expr _ (LowerIdent (pos, attrName))) = do
     objCid <- deduceType expr
     structs <- gets $ globStructs.sstGlob
     case filter ((objCid ==).structCid.snd) $ M.toList structs of
@@ -1309,7 +1310,7 @@ deduceType (Expr_FunCall expr (Tok_LP (pos, _)) _) = do
 
 deduceType (Expr_Parens _ [expr]) = deduceType expr
 
--- deduceType (Expr_Parens exprs) = {- tuple -}
+deduceType (Expr_Is {}) = return (stdClss M.! "Bool")
 
 deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
 
@@ -1442,7 +1443,7 @@ exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
                 ke $ ValFunction $ structCtor struct
 
 
-exprSem (Expr_Attr expr (LowerIdent (pos, attrName))) = do
+exprSem (Expr_Attr expr _ (LowerIdent (pos, attrName))) = do
     exee <- exprSem expr
     let objCid = expCid exee
     structs <- gets $ globStructs.sstGlob
@@ -1575,8 +1576,30 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                         (className expectedCls) ++ "' expected")
 
 exprSem (Expr_Parens _ [expr]) = exprSem expr
+exprSem (Expr_Parens (Tok_LP (pos, _)) _exprs) = notYetAt pos $ "Tuples"
 
--- exprSem (Expr_Parens exprs) = {- tuple -}
+exprSem (Expr_Is expr typeExpr) = do
+    exee <- exprSem expr
+    cid <- typeExprCid typeExpr
+    cls <- gets $ (!!! cid).globClasses.sstGlob
+    case cls of
+        ClassFun _ ->
+            notYet "Expr_Is for function types"
+        ClassDesc {} -> return ()
+    return $ RValue (stdClss M.! "Bool") $ mkExe $ \kv -> do
+        execRValue exee $ \val re mem -> do
+            let is = case val of
+                    ValNull -> False
+                    ValRef pt -> do
+                        let sid = objSid $ memObjAt mem pt
+                            strCid = structCid $ (reStructs re) !!! sid
+                            supers = classAllSupers $ (reClasses re) !!! strCid
+                        (cid == strCid) || (S.member cid supers)
+                    ValFunction _ -> False
+                    ValBool _ -> cid == (stdClss M.! "Bool")
+                    ValInt _ -> cid == (stdClss M.! "Int")
+                    ValChar _ -> cid == (stdClss M.! "Char")
+            kv (ValBool is) re mem
 
 exprSem expr = notYet $ printTree expr
 

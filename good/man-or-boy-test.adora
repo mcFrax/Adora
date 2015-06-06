@@ -3,9 +3,9 @@
 # Implementacja oparta o:
 #     http://rosettacode.org/wiki/Man_or_boy_test#Python
 
-type IF = () -> Int
+type IntF = () -> Int
 
-let a = fn(Int k, IF x1, IF x2, IF x3, IF x4, IF x5) -> Int:
+let a = fn(Int k, IntF x1, IntF x2, IntF x3, IntF x4, IntF x5) -> Int:
     let b = fn () -> Int:
         k = k-1
         return a(k, b, x1, x2, x3, x4)

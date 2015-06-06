@@ -49,6 +49,7 @@ data GlobEnv = GlobEnv {
 
 data RunEnv = RunEnv {
     reStructs :: SidMap,
+    reClasses :: CidMap,
     reReturn :: VarVal -> Cont,
     reBreak :: Cont,
     reContinue :: Cont
