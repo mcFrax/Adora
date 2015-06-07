@@ -14,6 +14,7 @@ import Paradora
 import Layoutadora
 
 import Semantics
+import StdLib
 
 compilationFailure :: IO a
 compilationFailure = exitWith $ ExitFailure 3
@@ -37,7 +38,7 @@ main = do
             hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
             compilationFailure
         Ok moduleSyntax -> do
-            case moduleSem moduleSyntax programPath of
+            case moduleSem moduleSyntax programPath stdlib of
                 Left errmsg -> do
                     hPutStrLn stderr $ showSemError errmsg
                     compilationFailure

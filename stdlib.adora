@@ -41,3 +41,5 @@ struct Node():
             return false
     implement BinTree:
         pass
+
+type String = Array[Char]

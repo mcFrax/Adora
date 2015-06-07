@@ -19,7 +19,6 @@ import Printadora(printTree)
 
 import Memory
 import Types
-import StdLib
 
 
 trace :: Show a => String -> a -> b -> b
@@ -284,8 +283,8 @@ topLevelFid = Fid 0
 --                                                                            --
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
-moduleSem :: Module -> String -> Either Err (IO ())
-moduleSem (Module_ stmts) fileName = do
+moduleSem :: Module -> String -> Module -> Either Err (IO ())
+moduleSem (Module_ stmts) fileName stdlib = do
     let Module_ stdlibStmts = stdlib
     (sst0, env0, exe0) <- do
         case runTCM (stmtSeqSem stdlibStmts) initSemState initEnv of
