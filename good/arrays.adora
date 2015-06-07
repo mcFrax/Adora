@@ -1,0 +1,16 @@
+var arr = Array[Int](1, 1)
+
+print arr.length, arr[0]
+
+arr[0] = 2
+
+print arr[0]
+
+arr = Array[Int](3, 1)
+
+print arr.length, arr[0], arr[1], arr[2]
+
+# EXPECTED OUTPUT #
+# 1 1
+# 2
+# 3 1 1 1

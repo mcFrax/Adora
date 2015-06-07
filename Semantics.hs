@@ -6,6 +6,7 @@ import Control.DeepSeq
 import Control.Monad
 import Control.Monad.Reader.Class
 import Control.Monad.State.Class
+import qualified Data.List as L
 import qualified Data.Map.Strict as M
 import Data.Maybe
 import qualified Data.Set as S
@@ -27,9 +28,35 @@ trace pref trac val = Debug.Trace.trace (pref ++ (show trac)) val
 #define TRACE(x) (trace (__FILE__ ++ ":" ++ (show (__LINE__ :: Int)) ++ " ") (x) $ seq (x) $ return ())
 
 
+className :: ClassDesc -> VarName
+className (ClassDesc{className_=name}) = name
+className (ClassFun sgn) = do
+    "<(" ++ (L.intercalate ", " args) ++ ") -> " ++ (show $ mthRetType sgn) ++ ">"
+    where
+        args = flip map (mthArgs sgn) $ \as -> do
+            "<" ++ (show $ argType as) ++ "> " ++ case argName as of
+                Just name -> name
+                Nothing -> "_"
+className (ClassArray cid) = "Array[" ++ (show cid) ++ "]"
+
+classProps :: ClassDesc -> M.Map VarName VarType
+classProps (ClassDesc{classProps_=props}) = props
+classProps (ClassFun _) = M.empty
+classProps (ClassArray _) = M.fromList [
+        ("length", VarType {
+            varMutable=False,
+            varClass=(stdClss M.! "Int"),
+            varStatic=False,
+            varDefPos=internalCodePos
+        })
+    ]
+
+
 data SemState = SemState {
-    sstGlob :: GlobEnv,
+    sstClasses :: CidMap,
+    sstStructs :: SidMap,
     sstFunClasses :: M.Map FunSgn Cid,
+    sstArrClasses :: M.Map Cid (Cid, Sid),
     sstNextCid :: Cid,
     sstNextSid :: Sid,
     sstFileName :: String
@@ -56,15 +83,40 @@ getFunctionCid fnSgn = do
         Just cid -> return cid
         Nothing -> do
             cid <- newCid
-            glob <- gets sstGlob
             let funClasses' = M.insert fnSgn cid funClasses
-                classes' = M.insert cid (ClassFun fnSgn) $ globClasses glob
             modify $ \sst -> sst{
-                    sstGlob=glob{globClasses=classes'},
                     sstFunClasses=funClasses'
                 }
+            updateClsDesc cid (ClassFun fnSgn)
             return cid
 
+getArrayCid :: Cid -> TCM Cid
+getArrayCid = (liftM fst).getArrayCidSid
+
+getArraySid :: Cid -> TCM Sid
+getArraySid = (liftM snd).getArrayCidSid
+
+getArrayCidSid :: Cid -> TCM (Cid, Sid)
+getArrayCidSid cid = do
+    arrClss <- gets sstArrClasses
+    case M.lookup cid arrClss of
+        Just ids -> return ids
+        Nothing -> do
+            error "FUUUCK"
+--             arrCid <- newCid
+--             arrSid <- newSid
+--             let ids = (arrCid, arrSid)
+--             let arrClss' = M.insert cid ids arrClss
+--             updateClsDesc arrCid $ ClassArray {
+--                     ???
+--                 }
+--             updateStrDesc arrSid $ StructArray {
+--                     ???
+--                 }
+--             modify $ \sst -> sst{
+--                     sstArrClasses=arrClss'
+--                 }
+--             return ids
 
 newtype TCM a = TCM {
     runTCM :: SemState -> LocEnv -> Either Err (SemState, LocEnv, a)
@@ -92,21 +144,18 @@ instance MonadReader LocEnv TCM where
         (st', _, res) <- run st (f env)
         return (st', env, res)
 
-modifyGlob :: (GlobEnv -> GlobEnv) -> TCM ()
-modifyGlob f = modify $ \sst -> sst{sstGlob=f $ sstGlob sst}
-
-updateGlobStr :: Sid -> StructDesc -> TCM ()
-updateGlobStr sid newDesc = do
-    modifyGlob $ \glob -> do
-        glob{
-            globStructs=M.insert sid newDesc $ globStructs glob
+updateStrDesc :: Sid -> StructDesc -> TCM ()
+updateStrDesc sid newDesc = do
+    modify $ \sst -> do
+        sst{
+            sstStructs=M.insert sid newDesc $ sstStructs sst
         }
 
-updateGlobCls :: Cid -> ClassDesc -> TCM ()
-updateGlobCls cid newDesc = do
-    modifyGlob $ \glob -> do
-        glob{
-            globClasses=M.insert cid newDesc $ globClasses glob
+updateClsDesc :: Cid -> ClassDesc -> TCM ()
+updateClsDesc cid newDesc = do
+    modify $ \sst -> do
+        sst{
+            sstClasses=M.insert cid newDesc $ sstClasses sst
         }
 
 -- environment modifications (tampering with Reader part):
@@ -209,8 +258,8 @@ moduleSem (Module_ stmts) fileName = do
     (sst, _, exe1) <- runTCM (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
     let
         runEnv = RunEnv {
-            reStructs=globStructs $ sstGlob sst,
-            reClasses=globClasses $ sstGlob sst,
+            reStructs=sstStructs sst,
+            reClasses=sstClasses sst,
             reReturn=error "return outside of function",
             reBreak=error "break outside a loop",
             reContinue=error "continue outside a loop"
@@ -219,11 +268,10 @@ moduleSem (Module_ stmts) fileName = do
     return $ runExe exe runEnv initMem
     where
         initSemState = SemState {
-            sstGlob=GlobEnv {
-                globClasses=stdGlobClss,
-                globStructs=M.empty
-            },
+            sstClasses=stdGlobClss,
+            sstStructs=M.empty,
             sstFunClasses=M.empty,
+            sstArrClasses=M.empty,
             sstNextCid=Cid 0,
             sstNextSid=Sid 0,
             sstFileName="<stdlib>"
@@ -444,18 +492,15 @@ hoistStmts stmts = do
             when (S.member sid stack) $ do
                 throwError $ ErrSomewhere (
                     "Unable to resolve inheritance: dependency cycle")
-            struct <- gets $ (!!! sid).globStructs.sstGlob
+            struct <- gets $ (!!! sid).sstStructs
             let directs = structDirectSupers struct
             unresolved' <- resolveMros' (S.fromList directs) (S.insert sid stack) unresolved
             directsMros <- forM directs $ \direct -> do
-                gets $ structMRO.(!!! direct).globStructs.sstGlob
+                gets $ structMRO.(!!! direct).sstStructs
             mro <- merge [sid] directsMros
-            modifyGlob $ \glob -> do
-                glob{
-                    globStructs=M.insert sid struct{
-                            structMRO=mro
-                        } $ globStructs glob
-                }
+            updateStrDesc sid (struct {
+                    structMRO=mro
+                })
             return $ S.delete sid unresolved'
         merge acc [] = return $ reverse acc
         merge acc mros = do
@@ -562,19 +607,19 @@ hoistStmt (Stmt_ClassDef clsDef@(TypeDefinition_Class {})) = do
                     "`" ++ (printTree t) ++ "' is struct, abstract class expected")
         let directSupers = S.fromList superClses
         clsStub <- compileClass cid ident mTmplSgn directSupers variants decls
-        updateGlobCls cid clsStub
+        updateClsDesc cid clsStub
         queueNextLevel $ do  -- 3
             allSupers <- closeSuperClss directSupers
             let clsStubWithAllSupers = clsStub {
                 classAllSupers=allSupers
             }
-            updateGlobCls cid clsStubWithAllSupers
+            updateClsDesc cid clsStubWithAllSupers
             queueNextLevels 2 $ do  -- 5
                 clsProps <- collectProps pos cid
                 let cls = clsStubWithAllSupers {
                     classProps_=clsProps
                 }
-                updateGlobCls cid cls
+                updateClsDesc cid cls
                 hoistingDone
 
 hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
@@ -613,13 +658,13 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
         -- TODO verify inheritance correctness - eliminate implementic struct classes without deriving from them
         clsDecls <- liftM catMaybes $ mapM (hoistStrClsDecl cid) decls
         clsStub <- compileClass cid ident mTmplSgn directSuperClsss [] clsDecls
-        updateGlobCls cid clsStub
+        updateClsDesc cid clsStub
         queueNextLevel $ do  -- 3
             allSuperClss <- closeSuperClss directSuperClsss
             let clsStubWithAllSupers = clsStub {
                 classAllSupers=allSuperClss
             }
-            updateGlobCls cid clsStubWithAllSupers
+            updateClsDesc cid clsStubWithAllSupers
             revAttrs <- foldl (>>=) (return []) $ map (hoistStrAttr cid) decls
             let attrs = reverse revAttrs
                 attrsMap = M.fromList attrs
@@ -635,25 +680,25 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     structCtor=error "Undefined structCtor",
                     structCtorSgn=error "Undefined structCtorSgn"
                 }
-            updateGlobStr sid structStub
+            updateStrDesc sid structStub
             q1 <- queueStructMRO sid
             q2 <- queueNextLevels 2 $ do  -- 5
                 clsProps <- collectProps strPos cid
                 let cls = clsStubWithAllSupers {
                     classProps_=clsProps
                 }
-                updateGlobCls cid cls
-                updateGlobCls superCid $ ClassDesc {
+                updateClsDesc cid cls
+                updateClsDesc superCid $ ClassDesc {
                     className_="<super from " ++ strName ++ ">",
                     classProps_=clsProps, -- TODO - clean that
                     classOwnProps=M.empty, -- doesn't really matter
                     classDirectSupers=S.empty, -- TODO - clean that
                     classAllSupers=allSuperClss
                 }
-                stubWithMRO <- gets $ (!!! sid).globStructs.sstGlob
+                stubWithMRO <- gets $ (!!! sid).sstStructs
                 let mergeAttrs acc [] = return acc
                     mergeAttrs acc (sid':sids) = do
-                        attrs' <- gets $ structOwnAttrs.(!!! sid').globStructs.sstGlob
+                        attrs' <- gets $ structOwnAttrs.(!!! sid').sstStructs
                         let acc' = M.union acc attrs'
                         if (M.size acc') == ((M.size acc) + (M.size attrs')) then do
                             mergeAttrs acc' sids
@@ -687,26 +732,26 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                         -- mem'' = allocVar "self" (ValRef pt) mem' -- local ctor variable
                         -- TODO: execute custom contructor body/init method?
                         in (reReturn re) (ValRef pt) re mem'
-                updateGlobStr sid stubWithAttrs
+                updateStrDesc sid stubWithAttrs
                 queueNextLevel $ do -- 6
                     directImpl <- foldl (>>=) (return M.empty) $ map (hoistStrDecl cid) decls
                     let stubWithDirImpls = stubWithAttrs {
                         structDirImpl=directImpl
                     }
-                    updateGlobStr sid stubWithDirImpls
+                    updateStrDesc sid stubWithDirImpls
                     queueNextLevel $ do -- 7
                         impl <- completeImpl strPos sid $ clsProps
                         let struct = stubWithDirImpls {
                                     structImpl=impl
                                 }
-                        updateGlobStr sid struct
+                        updateStrDesc sid struct
                         hoistingDone
             return $ q1 >=> q2
 hoistStmt _stmt = hoistingDone
 
 completeImpl :: (Int, Int) -> Sid -> M.Map VarName VarType -> TCM Impl
 completeImpl pos sid props = do
-    structs <- gets $ globStructs.sstGlob
+    structs <- gets $ sstStructs
     let struct = structs !!! sid
         superSids = structMRO struct
         revMROImpl = map (structDirImpl.(structs !!!)) (reverse superSids)
@@ -726,7 +771,7 @@ completeImpl pos sid props = do
 
 collectProps :: (Int, Int) -> Cid -> TCM (M.Map VarName VarType)
 collectProps pos cid = do
-    classes <- gets $ globClasses.sstGlob
+    classes <- gets $ sstClasses
     let cls = classes !!! cid
         supers = map (classes !!!) $ [cid] ++ (S.toList $ classAllSupers cls)
         superProps = map classOwnProps supers
@@ -795,7 +840,7 @@ hoistStrDecl _ (InStruct_ImplDefinition clsName inImpls) impls = do
     implProps <- foldl (>>=) (return M.empty) $ flip map inImpls $ \inImpl props -> do
         inClass <- inImplToInClass inImpl
         hoistClsDecl inClass props
-    clsProps <- gets $ classProps.(!!! implCid).globClasses.sstGlob
+    clsProps <- gets $ classProps.(!!! implCid).sstClasses
     let implPropsSet = S.fromList $ map (\(n, VarType mut cid _ _) -> (n, mut, cid)) $ M.toList implProps
         clsPropsSet = S.fromList $ map (\(n, VarType mut cid _ _) -> (n, mut, cid)) $ M.toList clsProps
         bads = implPropsSet S.\\ clsPropsSet
@@ -1324,17 +1369,19 @@ deduceType (Expr_Lambda _ signature _) = do
     (fnSgn, _, _) <- fHeaderSem signature AcceptDefaults
     getFunctionCid fnSgn
 
-deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
+deduceType expr@(Expr_TypeName (UpperIdent (pos, name))) = do
+    when (name == "Array") $ do
+        notYetAt pos "Class reflection"
     typeExpr <- typeExprSem expr
     case typeExpr of
         ClsExpr _cid -> notYetAt pos "Class reflection"
         StrExpr sid _ -> do
-            struct <- gets $ (!!! sid).globStructs.sstGlob
+            struct <- gets $ (!!! sid).sstStructs
             getFunctionCid $ structCtorSgn struct
 
 deduceType (Expr_Attr expr _ (LowerIdent (pos, attrName))) = do
     objCid <- deduceType expr
-    structs <- gets $ globStructs.sstGlob
+    structs <- gets $ sstStructs
     case filter ((objCid ==).structCid.snd) $ M.toList structs of
         [] -> throwAt pos ("Unable to deduce struct type of expression `" ++
                            (printTree expr) ++ "'. Attrs are not accesible")
@@ -1355,14 +1402,14 @@ deduceType (Expr_Prop expr (LowerIdent (pos, propName))) = do
 
 deduceType (Expr_FunCall expr (Tok_LP (pos, _)) _) = do
     funCid <- deduceType expr
-    classes <- gets $ globClasses.sstGlob
+    classes <- gets $ sstClasses
     case classes !!! funCid of
         ClassFun fnSgn -> do
             case mthRetType fnSgn of
                 Nothing -> return $ stdClss M.! "Void"
                 Just cid -> return cid
-        ClassDesc {className_=clsName} -> do
-            -- TODO: in future, being function derivative should be enough
+        _ -> do
+            let clsName = className $ classes !!! funCid
             throwAt pos ("Trying to call `" ++ (printTree expr) ++ "' " ++
                          "of type `" ++ clsName ++ "', which is not a function")
 
@@ -1370,11 +1417,17 @@ deduceType (Expr_Parens _ [expr]) = deduceType expr
 
 deduceType (Expr_Is {}) = return (stdClss M.! "Bool")
 
+deduceType (Expr_Brackets (Expr_TypeName (UpperIdent (_, "Array"))) _ [expr]) = do
+    cid <- typeExprCid expr
+    sid <- getArraySid cid
+    struct <- gets $ (!!! sid).sstStructs
+    getFunctionCid $ structCtorSgn struct
+
 deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
 
 
 getCls :: Cid -> TCM ClassDesc
-getCls cid = gets $ (!!! cid).globClasses.sstGlob
+getCls cid = gets $ (!!! cid).sstClasses
 
 deduceTypeNumBinOp :: (Int, Int) -> Expr -> Expr -> TCM Cid
 deduceTypeNumBinOp pos exp1 exp2 = do
@@ -1424,7 +1477,7 @@ exprSem (Expr_As expr (Tok_As (pos, _)) asExpr) = do
     superCid <- typeExprCid asExpr
     ok <- isSubclass subCid superCid
     when (not ok) $ do
-        classes <- gets $ globClasses.sstGlob
+        classes <- gets $ sstClasses
         let subCls = classes !!! subCid
             superCls = classes !!! superCid
         throwAt pos ("Illegal cast: expression`" ++ (printTree expr) ++
@@ -1521,7 +1574,7 @@ exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
     case typeExpr of
         ClsExpr _cid -> notYetAt pos "Class reflection"
         StrExpr sid _ -> do
-            struct <- gets $ (!!! sid).globStructs.sstGlob
+            struct <- gets $ (!!! sid).sstStructs
             cid <- getFunctionCid $ structCtorSgn struct
             return $ RValue cid $ mkExe $ \ke -> do
                 ke $ ValFunction $ structCtor struct
@@ -1530,7 +1583,7 @@ exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
 exprSem (Expr_Attr expr _ (LowerIdent (pos, attrName))) = do
     exee <- exprSem expr
     let objCid = expCid exee
-    structs <- gets $ globStructs.sstGlob
+    structs <- gets $ sstStructs
     cid <- case filter ((objCid ==).structCid.snd) $ M.toList structs of
         [] -> throwAt pos ("Unable to deduce struct type of expression `" ++
                            (printTree expr) ++ "'. Attrs are not accesible")
@@ -1590,15 +1643,15 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
             else do
                 return $ S.insert name set
         ) S.empty kwargs
-    classes <- gets $ globClasses.sstGlob
+    classes <- gets $ sstClasses
     cid <- case classes !!! (expCid exeFn) of
         ClassFun fnSgn -> do
             checkArgTypes argNamesSet (mthArgs fnSgn) argCidTuples
             case mthRetType fnSgn of
                 Nothing -> return $ stdClss M.! "Void"
                 Just cid -> return cid
-        ClassDesc {className_=clsName} -> do
-            -- TODO: in future, being function derivative should be enough
+        _ -> do
+            let clsName = className $ classes !!! (expCid exeFn)
             throwAt pos ("Trying to call `" ++ (printTree expr) ++ "' " ++
                          "of type `" ++ clsName ++ "', which is not a function")
     return $ RValue cid $ mkExe $ \kv -> do
@@ -1652,7 +1705,7 @@ exprSem (Expr_FunCall expr (Tok_LP (pos, _)) args) = do
                         throwAt pos ("Function `" ++ (printTree expr) ++ "' does not " ++
                                     "have argument named `" ++ name ++ "'")
         throwBadArg expectedCid actualCid = do
-            classes <- gets $ globClasses.sstGlob
+            classes <- gets $ sstClasses
             let expectedCls = classes !!! expectedCid
                 actualCls = classes !!! actualCid
             throwAt pos ("Expression`" ++ (printTree expr) ++
@@ -1665,10 +1718,12 @@ exprSem (Expr_Parens (Tok_LP (pos, _)) _exprs) = notYetAt pos $ "Tuples"
 exprSem (Expr_Is expr typeExpr) = do
     exee <- exprSem expr
     cid <- typeExprCid typeExpr
-    cls <- gets $ (!!! cid).globClasses.sstGlob
+    cls <- gets $ (!!! cid).sstClasses
     case cls of
         ClassFun _ ->
             notYet "Expr_Is for function types"
+        ClassArray _ ->
+            notYet "Expr_Is for array types"
         ClassDesc {} -> return ()
     return $ RValue (stdClss M.! "Bool") $ mkExe $ \kv -> do
         execRValue exee $ \val -> do
@@ -1902,7 +1957,7 @@ isSubclass subCid superCid = do
     if subCid == superCid then do
         return True
     else do
-        classes <- gets $ globClasses.sstGlob
+        classes <- gets $ sstClasses
         let subCls = classes !!! subCid
             superCls = classes !!! superCid
         case subCls of
@@ -1910,6 +1965,7 @@ isSubclass subCid superCid = do
                 ClassDesc {} -> do
                     return $ S.member superCid $ classAllSupers subCls
                 ClassFun _ -> return False
+                ClassArray {} -> return False
             ClassFun subSgn -> case superCls of
                 ClassDesc {} -> return False
                 ClassFun supSgn -> do
@@ -1919,6 +1975,8 @@ isSubclass subCid superCid = do
                         liftM (all id) $ mapM argOk $ zip supArgs subArgs
                     else do
                         return False
+                ClassArray {} -> return False
+            ClassArray {} -> return False
     where
         argOk sgns = liftM2 (&&) (nameOk sgns) (classOk sgns)
         nameOk (supAS, subAS) = do
@@ -1931,7 +1989,7 @@ isSubclass subCid superCid = do
 
 closeSuperClss :: S.Set Cid -> TCM (S.Set Cid)
 closeSuperClss directSupers = do
-    classes <- gets $ globClasses.sstGlob
+    classes <- gets $ sstClasses
     let closeSuperClss' acc nextLevelSet = do
             if S.null nextLevelSet then
                 return acc
@@ -1953,7 +2011,7 @@ whatNum pos cid acceptDouble = do
     else if acceptDouble && (cid == (stdClss M.! "Double")) then do
         return False
     else do
-        clsName <- gets $ className.(!!! cid).globClasses.sstGlob
+        clsName <- gets $ className.(!!! cid).sstClasses
         throwAt pos ("`" ++ clsName ++ "' is not a number type")
 
 toDouble :: VarVal -> Double

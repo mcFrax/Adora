@@ -2,7 +2,6 @@ module Types where
 
 import Control.DeepSeq
 import Control.Exception
-import Data.List
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import System.Exit(exitWith, ExitCode(..))
@@ -42,11 +41,6 @@ data LocEnv = LocEnv {
     envInsideLoop :: Bool -- whether break and continue are legal
 } deriving Show
 
-data GlobEnv = GlobEnv {
-    globClasses :: CidMap,
-    globStructs :: SidMap
-} deriving Show
-
 data RunEnv = RunEnv {
     reStructs :: SidMap,
     reClasses :: CidMap,
@@ -56,28 +50,15 @@ data RunEnv = RunEnv {
 }
 
 data ClassDesc = ClassDesc {
-    className_ :: String,
-    classOwnProps :: M.Map VarName VarType,
-    classProps_ :: M.Map VarName VarType,
-    classDirectSupers :: S.Set Cid,
-    classAllSupers :: S.Set Cid
-} | ClassFun FunSgn
+        className_ :: String,
+        classOwnProps :: M.Map VarName VarType,
+        classProps_ :: M.Map VarName VarType,
+        classDirectSupers :: S.Set Cid,
+        classAllSupers :: S.Set Cid
+    }
+    | ClassFun FunSgn
+    | ClassArray Cid
     deriving Show
-
-className :: ClassDesc -> VarName
-className (ClassDesc{className_=name}) = name
-className (ClassFun sgn) = do
-    "<(" ++ (intercalate ", " args) ++ ") -> " ++ (show $ mthRetType sgn) ++ ">"
-    where
-        args = flip map (mthArgs sgn) $ \as -> do
-            "<" ++ (show $ argType as) ++ "> " ++ case argName as of
-                Just name -> name
-                Nothing -> "_"
-
-classProps :: ClassDesc -> M.Map VarName VarType
-classProps (ClassDesc{classProps_=props}) = props
-classProps (ClassFun _) = M.empty
-
 
 data FunSgn = FunSgn {
     mthRetType :: Maybe Cid,
@@ -98,6 +79,11 @@ data StructDesc = StructDesc {
     structOwnAttrs :: M.Map VarName Cid,  -- attrs defined in this struct
     structAttrs :: M.Map VarName Cid,
     structDirImpl :: M.Map VarName PropImpl,  -- prop impls defined/overriden in this struct
+    structImpl :: Impl,
+    structCtor :: FunImpl,
+    structCtorSgn :: FunSgn
+} | StructArray {
+    structCid :: Cid,
     structImpl :: Impl,
     structCtor :: FunImpl,
     structCtorSgn :: FunSgn
@@ -184,6 +170,10 @@ isTruthy (ValChar _) = True
 data Object = Object {
     objSid :: Sid,
     objAttrs :: M.Map VarName VarVal
+} | Array {
+    objSid :: Sid,
+    arrLength :: Int,
+    arrArray :: M.Map Int VarVal
 }
 
 instance Show Object where
@@ -191,6 +181,7 @@ instance Show Object where
 
 instance NFData Object where
     rnf (Object _sid attrs) = rnf attrs
+    rnf (Array _sid _len arr) = rnf arr
 
 objStruct :: Object -> RunEnv -> StructDesc
 objStruct obj re = (reStructs re) M.! (objSid obj)
