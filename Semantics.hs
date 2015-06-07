@@ -102,21 +102,59 @@ getArrayCidSid cid = do
     case M.lookup cid arrClss of
         Just ids -> return ids
         Nothing -> do
-            error "FUUUCK"
---             arrCid <- newCid
---             arrSid <- newSid
---             let ids = (arrCid, arrSid)
---             let arrClss' = M.insert cid ids arrClss
---             updateClsDesc arrCid $ ClassArray {
---                     ???
---                 }
---             updateStrDesc arrSid $ StructArray {
---                     ???
---                 }
---             modify $ \sst -> sst{
---                     sstArrClasses=arrClss'
---                 }
---             return ids
+            arrCid <- newCid
+            arrSid <- newSid
+            let ids = (arrCid, arrSid)
+                ctorSgn = FunSgn {
+                        mthRetType=Just arrCid,
+                        mthArgs=[
+                            ArgSgn {
+                                    argName=Just "length",
+                                    argType=(stdClss M.! "Int"),
+                                    argHasDefault=False
+                            },
+                            ArgSgn {
+                                    argName=Just "fillWith",
+                                    argType=cid,
+                                    argHasDefault=False
+                            }
+                        ]
+                    }
+                constructor  argTuples = do
+                    mkCall ctorSgn M.empty exeCtorBody topLevelFid argTuples
+                exeCtorBody = mkExe $ \_ re mem -> let
+                    vars = frameContent $ memFrame mem
+                    len = asInt $ vars !!! "length"
+                    fillWith = vars !!! "fillWith"
+                    indices = if len >= 0
+                        then [0..(len-1)]
+                        else error $ "array len == " ++ (show len)
+                    arrContent = M.fromList $ map (\i -> (i, fillWith)) indices
+                    (pt, mem') = allocObject Array {
+                            objSid=arrSid,
+                            arrLength=len,
+                            arrArray=arrContent
+                        } mem
+                    in (reReturn re) (ValRef pt) re mem'
+                lenGetter pt = mkExe $ \kv re mem -> do
+                    kv (ValInt $ arrLength $ memObjAt mem pt) re mem
+            updateClsDesc arrCid $ ClassArray cid
+            updateStrDesc arrSid $ StructArray {
+                    structCid=arrCid,
+                    structImpl=M.fromList [
+                        ("length", (PropImpl {
+                            propGetter=lenGetter,
+                            propSetter=(error "Undefined propSetter (length)"),
+                            propDefPos=internalCodePos
+                        }, Nothing))
+                    ],
+                    structCtor=FunImpl ctorSgn constructor,
+                    structCtorSgn=ctorSgn
+                }
+            modify $ \sst -> sst{
+                    sstArrClasses=M.insert cid ids arrClss
+                }
+            return ids
 
 newtype TCM a = TCM {
     runTCM :: SemState -> LocEnv -> Either Err (SemState, LocEnv, a)
@@ -492,7 +530,7 @@ hoistStmts stmts = do
             when (S.member sid stack) $ do
                 throwError $ ErrSomewhere (
                     "Unable to resolve inheritance: dependency cycle")
-            struct <- gets $ (!!! sid).sstStructs
+            struct <- getStr sid
             let directs = structDirectSupers struct
             unresolved' <- resolveMros' (S.fromList directs) (S.insert sid stack) unresolved
             directsMros <- forM directs $ \direct -> do
@@ -695,7 +733,7 @@ hoistStmt (Stmt_StructDef strDef@(TypeDefinition_Struct {})) = do
                     classDirectSupers=S.empty, -- TODO - clean that
                     classAllSupers=allSuperClss
                 }
-                stubWithMRO <- gets $ (!!! sid).sstStructs
+                stubWithMRO <- getStr sid
                 let mergeAttrs acc [] = return acc
                     mergeAttrs acc (sid':sids) = do
                         attrs' <- gets $ structOwnAttrs.(!!! sid').sstStructs
@@ -1322,13 +1360,16 @@ typeExprSem (Expr_FnType sgnExpr@(FSignature_ _ _ _)) = do
     (fnSgn, _) <- fSignatureSem sgnExpr
     cid <- getFunctionCid fnSgn
     return $ ClsExpr cid
-typeExprSem (Expr_Brackets _ (Tok_LB (pos, _)) _) = do
-    notYetAt pos "Expr_Brackets as template application"
 typeExprSem (Expr_NestedType _ (UpperIdent (pos, _))) = do
     notYetAt pos "Expr_NestedType"
 typeExprSem (Expr_TypeVar (DollarIdent (pos, _))) = do
     notYetAt pos "Expr_TypeVar"
 typeExprSem (Expr_Parens _ [expr]) = typeExprSem expr
+typeExprSem (Expr_Brackets (Expr_TypeName (UpperIdent (_, "Array"))) _ [expr]) = do
+    (cid, sid) <- getArrayCidSid =<< (typeExprCid expr)
+    return $ StrExpr sid cid
+typeExprSem (Expr_Brackets _ (Tok_LB (pos, _)) _) = do
+    notYetAt pos "Expr_Brackets as template application"
 typeExprSem expr = do
     throwError $ ErrSomewhere $ "`" ++ (printTree expr) ++ "' is not a proper type name"
 
@@ -1369,14 +1410,12 @@ deduceType (Expr_Lambda _ signature _) = do
     (fnSgn, _, _) <- fHeaderSem signature AcceptDefaults
     getFunctionCid fnSgn
 
-deduceType expr@(Expr_TypeName (UpperIdent (pos, name))) = do
-    when (name == "Array") $ do
-        notYetAt pos "Class reflection"
+deduceType expr@(Expr_TypeName (UpperIdent (pos, _))) = do
     typeExpr <- typeExprSem expr
     case typeExpr of
         ClsExpr _cid -> notYetAt pos "Class reflection"
         StrExpr sid _ -> do
-            struct <- gets $ (!!! sid).sstStructs
+            struct <- getStr sid
             getFunctionCid $ structCtorSgn struct
 
 deduceType (Expr_Attr expr _ (LowerIdent (pos, attrName))) = do
@@ -1420,7 +1459,7 @@ deduceType (Expr_Is {}) = return (stdClss M.! "Bool")
 deduceType (Expr_Brackets (Expr_TypeName (UpperIdent (_, "Array"))) _ [expr]) = do
     cid <- typeExprCid expr
     sid <- getArraySid cid
-    struct <- gets $ (!!! sid).sstStructs
+    struct <- getStr sid
     getFunctionCid $ structCtorSgn struct
 
 deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
@@ -1428,6 +1467,9 @@ deduceType expr = notYet $ "deduceType for " ++ (printTree expr)
 
 getCls :: Cid -> TCM ClassDesc
 getCls cid = gets $ (!!! cid).sstClasses
+
+getStr :: Sid -> TCM StructDesc
+getStr sid = gets $ (!!! sid).sstStructs
 
 deduceTypeNumBinOp :: (Int, Int) -> Expr -> Expr -> TCM Cid
 deduceTypeNumBinOp pos exp1 exp2 = do
@@ -1574,7 +1616,7 @@ exprSem expr@(Expr_TypeName (UpperIdent (pos, _))) = do
     case typeExpr of
         ClsExpr _cid -> notYetAt pos "Class reflection"
         StrExpr sid _ -> do
-            struct <- gets $ (!!! sid).sstStructs
+            struct <- getStr sid
             cid <- getFunctionCid $ structCtorSgn struct
             return $ RValue cid $ mkExe $ \ke -> do
                 ke $ ValFunction $ structCtor struct
@@ -1718,7 +1760,7 @@ exprSem (Expr_Parens (Tok_LP (pos, _)) _exprs) = notYetAt pos $ "Tuples"
 exprSem (Expr_Is expr typeExpr) = do
     exee <- exprSem expr
     cid <- typeExprCid typeExpr
-    cls <- gets $ (!!! cid).sstClasses
+    cls <- getCls cid
     case cls of
         ClassFun _ ->
             notYet "Expr_Is for function types"
@@ -1728,6 +1770,38 @@ exprSem (Expr_Is expr typeExpr) = do
     return $ RValue (stdClss M.! "Bool") $ mkExe $ \kv -> do
         execRValue exee $ \val -> do
             runtimeClassCheck cid val (kv.ValBool)
+
+exprSem (Expr_Brackets (Expr_TypeName (UpperIdent (_, "Array"))) _ [typeExpr]) = do
+    cid <- typeExprCid typeExpr
+    arrSid <- getArraySid cid
+    struct <- getStr arrSid
+    ctorCid <- getFunctionCid $ structCtorSgn struct
+    return $ RValue ctorCid $ mkExe $ \ke -> do
+        ke $ ValFunction $ structCtor struct
+
+exprSem (Expr_Brackets expr (Tok_LB (pos, _)) [indexExpr]) = do
+    arrExe <- exprSem expr
+    indexExe <- exprSem indexExpr
+    cls <- getCls $ expCid arrExe
+    case cls of
+        ClassArray cid -> do
+            let exe f = mkExe $ \kv -> do
+                    execRValue arrExe $ \(ValRef arrPt) -> do
+                        execRValue indexExe $ \(ValInt i) re mem -> do
+                            let arr = memObjAt mem arrPt
+                                arrContent=arrArray arr
+                                val = arrContent !!! i
+                                arr' = arr{
+                                        arrArray=M.insert i (f val) arrContent
+                                    }
+                                mem' = memAdjust mem arrPt (const arr')
+                            kv val re mem'
+                exeGet = exe id
+                exeSet val = mkExe $ \ku -> do
+                    exec (exe $ const val) $ \_val -> ku ()
+            return $ LValue cid exeGet exeSet
+        _ -> throwAt pos ("Expression `" ++ (printTree expr) ++ "' of type `" ++
+                          (className cls) ++ "' is not an array")
 
 exprSem expr = notYet $ printTree expr
 
