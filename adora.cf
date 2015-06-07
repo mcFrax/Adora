@@ -146,6 +146,7 @@ Stmt_ClassDef.      Stmt ::= ClassDefinition ;
 Stmt_StructDef.     Stmt ::= StructDefinition ;
 Stmt_AliasDef.      Stmt ::= AliasDefinition ;
 Stmt_Expr.          Stmt ::= Expr ;
+Stmt_Fn.            Stmt ::= Tok_Fn LowerIdent FHeader StatementBlock ;
 Stmt_Let.           Stmt ::= "let" LowerIdent Tok_Assign Expr ;  -- constant
 Stmt_LetTuple.      Stmt ::= "let" Tok_LP [LowerIdent] ")" Tok_Assign Expr ;  -- tuple unpacking
 Stmt_Var.           Stmt ::= "var" LowerIdent Tok_Assign Expr ;  -- variable

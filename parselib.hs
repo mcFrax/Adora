@@ -17,7 +17,7 @@ main = do
             source <- readFile sourcePath
             tree <- case pModule $ resolveLayout True . myLexer $ source of
                 Bad errmsg -> do
-                    hPutStrLn stderr $ "Parser error:\n" ++ errmsg ++ "\n"
+                    hPutStrLn stderr $ "parselib: Parser error:\n" ++ errmsg ++ "\n"
                     exitFailure
                 Ok tree -> return tree
             hsFile <- openFile hsPath WriteMode

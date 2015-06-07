@@ -294,6 +294,7 @@ moduleSem (Module_ stmts) fileName stdlib = do
                        (showSemError errmsg))
     (sst, _, exe1) <- runTCM (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
     let
+        exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
         runEnv = RunEnv {
             reStructs=sstStructs sst,
             reClasses=sstClasses sst,
@@ -301,7 +302,10 @@ moduleSem (Module_ stmts) fileName stdlib = do
             reBreak=error "break outside a loop",
             reContinue=error "continue outside a loop"
         }
-        exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
+        initMem = foldl (flip ($)) emptyMem $ [
+                allocVar "true" $ ValBool True,
+                allocVar "false" $ ValBool False
+            ]
     return $ runExe exe runEnv initMem
     where
         initSemState = SemState {
@@ -324,11 +328,6 @@ moduleSem (Module_ stmts) fileName stdlib = do
             envExpectedReturnType=Nothing,
             envInsideLoop=False
         }
-
-        initMem = foldl (flip ($)) emptyMem $ [
-                allocVar "true" $ ValBool True,
-                allocVar "false" $ ValBool False
-            ]
 
         emptyMem = Memory {
             memFid=topLevelFid,
@@ -612,6 +611,8 @@ hoistStmt (Stmt_Let ident _ expr) = do
     queueNextLevels 5 $ do
         cid <- deduceType expr
         hoistVar cid False ident
+hoistStmt (Stmt_Fn tokFn@(Tok_Fn (pos, _)) ident header bodyBlock) = do
+    hoistStmt (Stmt_Let ident (Tok_Assign (pos, "=")) (Expr_Lambda tokFn header bodyBlock))
 hoistStmt (Stmt_LetTuple {}) = do
     notYet $ "hoistStmt (Stmt_LetTuple ..)"
 hoistStmt (Stmt_Var ident _ expr) = do
@@ -1314,6 +1315,9 @@ stmtSem (Stmt_Case expr caseClauses) = do
                         exec bodyExe ku
                     else do
                         acc ku val
+
+stmtSem (Stmt_Fn tokFn@(Tok_Fn (pos, _)) ident header bodyBlock) = do
+    stmtSem (Stmt_Let ident (Tok_Assign (pos, "=")) (Expr_Lambda tokFn header bodyBlock))
 
 -- Stmt_LetTuple.      Stmt ::= "let" "(" [LowerIdent] ")" "=" Expr ;  -- tuple unpacking
 -- Stmt_Case.          Stmt ::= "case" Expr "class" "of" "{" [CaseClause] "}";

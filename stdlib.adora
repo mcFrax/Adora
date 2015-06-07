@@ -43,3 +43,19 @@ struct Node():
         pass
 
 type String = Array[Char]
+
+fn printStr(String string):
+    pass  # placeholder
+
+fn putChar(Char char):
+    pass  # placeholder
+
+fn printLn(String string):
+    printStr(string);
+    putChar('\n');
+
+fn getChar() -> Char:
+    return ' '  # placeholder
+
+fn getLine(String string):
+    pass  # placeholder
