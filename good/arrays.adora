@@ -10,7 +10,14 @@ arr = Array[Int](3, 1)
 
 print arr.length, arr[0], arr[1], arr[2]
 
+var i = 0
+let arr1 = ['a', 'b', 'c', 'd']
+while i < arr1.length:
+    putChar(arr1[i])
+    i = i+1
+
 # EXPECTED OUTPUT #
 # 1 1
 # 2
 # 3 1 1 1
+# abcd

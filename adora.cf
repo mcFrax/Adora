@@ -254,7 +254,8 @@ Expr_Var.       Expr11 ::= LowerIdent ;
 Expr_TypeName.  Expr11 ::= UpperIdent ;
 Expr_TypeVar.   Expr11 ::= DollarIdent ;
 
-LstVal_None.   LstVal ::= Tok_LB "]" ;
+-- LstVal_None.   LstVal ::= Tok_LB "]" ;
+-- disabled because of problems with type inference
 LstVal_Some.   LstVal ::= Tok_LB [Expr] "]" ;
 
 Expr_Parens.   Expr12 ::= Tok_LP [Expr] ")" ;

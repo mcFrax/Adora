@@ -273,6 +273,12 @@ stdGlobClss = do
 topLevelFid :: Fid
 topLevelFid = Fid 0
 
+stringSid :: Sid
+stringSid = Sid 0
+
+stringCid :: Cid
+stringCid = Cid 0
+
 
 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 --                                 __      __    _____                        --
@@ -287,25 +293,56 @@ moduleSem :: Module -> String -> Module -> Either Err (IO ())
 moduleSem (Module_ stmts) fileName stdlib = do
     let Module_ stdlibStmts = stdlib
     (sst0, env0, exe0) <- do
-        case runTCM (stmtSeqSem stdlibStmts) initSemState initEnv of
+        let compileStdLib = do
+            _ <- getArrayCidSid (stdClss M.! "Char") -- reserve stringSid for String
+            stmtSeqSem stdlibStmts
+        case runTCM compileStdLib initSemState initEnv of
             Right res -> return res
             Left errmsg -> do
                 error ("Error in standard library:\n" ++
                        (showSemError errmsg))
     (sst, _, exe1) <- runTCM (stmtSeqSem stmts) sst0{sstFileName=fileName} env0
-    let
-        exe = mkExe $ \ku -> exec exe0 $ \_ -> exec exe1 ku
-        runEnv = RunEnv {
+    let runEnv = RunEnv {
             reStructs=sstStructs sst,
             reClasses=sstClasses sst,
             reReturn=error "return outside of function",
             reBreak=error "break outside a loop",
             reContinue=error "continue outside a loop"
         }
-        initMem = foldl (flip ($)) emptyMem $ [
+        initMem = foldr ($) emptyMem $ [
                 allocVar "true" $ ValBool True,
                 allocVar "false" $ ValBool False
             ]
+        exe = mkExe $ \ku -> exec exe0 $ \_ re0 mem0 -> do
+            let mem1 = foldr ($) mem0 $ [
+                    replaceFun "printStr" (\[(_, exeStr)] -> mkExe $ \kv -> do
+                            exec exeStr $ \(ValRef pt) re mem -> do
+                                let arr = arrArray $ memObjAt mem pt
+                                putStr $ map (asChar.snd) $ M.toAscList arr
+                                kv ValNull re mem
+                        ),
+                    replaceFun "putChar" (\[(_, exeStr)] -> mkExe $ \kv -> do
+                            exec exeStr $ \(ValChar c) re mem -> do
+                                putChar c
+                                kv ValNull re mem
+                        ),
+                    replaceFun "getChar" (\[] -> mkExe $ \kv re mem -> do
+                            c <- getChar
+                            kv (ValChar c) re mem
+                        ),
+                    replaceFun "getLine" (\[] -> mkExe $ \kv re mem -> do
+                            s <- getLine
+                            let (pt, mem') = allocObject (mkStringObj s) mem
+                            kv (ValRef pt) re mem'
+                        )
+                    ]
+                replaceFun name body mem = do
+                    let (ValFunction impl) = getVar name mem
+                        impl'=impl {
+                                funBody=body
+                            }
+                    assignVar name (ValFunction impl') mem
+            exec exe1 ku re0 mem1
     return $ runExe exe runEnv initMem
     where
         initSemState = SemState {
@@ -313,8 +350,8 @@ moduleSem (Module_ stmts) fileName stdlib = do
             sstStructs=M.empty,
             sstFunClasses=M.empty,
             sstArrClasses=M.empty,
-            sstNextCid=Cid 0,
-            sstNextSid=Sid 0,
+            sstNextCid=stringCid,
+            sstNextSid=stringSid,
             sstFileName="<stdlib>"
         }
 
@@ -1384,11 +1421,15 @@ typeExprCid expr = do
 
 deduceType :: Expr -> TCM Cid
 deduceType (Expr_Char _) = return (stdClss M.! "Char")
--- deduceType (Expr_String c) _ =
+deduceType (Expr_String _) = return stringCid
 deduceType (Expr_Int _) = return (stdClss M.! "Int")
 deduceType (Expr_Double _) = return (stdClss M.! "Double")
 -- deduceType (Expr_Tuple _) _ = ???
--- deduceType (Expr_Array _) _ = ???
+deduceType (Expr_Array (LstVal_Some _ (expr:_))) = do
+    -- TODO: look at all expressions?
+    cid <- deduceType expr
+    getArrayCid cid
+
 deduceType (Expr_Var (LowerIdent (pos, varName))) = do
     vars <- asks envVars
     case M.lookup varName vars of
@@ -1495,13 +1536,33 @@ deduceTypeNumBinOp pos exp1 exp2 = do
 exprSem :: Expr -> TCM ExprSem
 exprSem (Expr_Char c) = do
     return $ RValue (stdClss M.! "Char") $ mkExe ($ ValChar c)
--- exprSem (Expr_String c) _ =
+exprSem (Expr_String s) = do
+    return $ RValue stringCid $ mkExe $ \kv re mem -> do
+        let (pt, mem') = allocObject (mkStringObj s) mem
+        kv (ValRef pt) re mem'
 exprSem (Expr_Int i) = do
     return $ RValue (stdClss M.! "Int") $ mkExe ($ ValInt $ fromInteger i)
 exprSem (Expr_Double d) = do
     return $ RValue (stdClss M.! "Double") $ mkExe ($ ValDouble $ d)
--- exprSem (Expr_Tuple _) _ = ???
--- exprSem (Expr_Array _) _ = ???
+exprSem (Expr_Array (LstVal_Some (Tok_LB (pos, _)) (expr0:exprs))) = do
+    e0exe <- exprSem expr0
+    let arr0exe = mkExe $ \karr -> execRValue e0exe $ \val -> karr [val]
+    (exprsExe, _) <- foldM (\(exprsExe, cid) expr -> do
+            eexe <- exprSem expr
+            when ((expCid eexe) /= cid) $ do
+                throwAt pos "Values of different type in array literal"
+            let exe = mkExe $ \karr -> do
+                exec exprsExe $ \arr ->
+                    execRValue eexe $ \val ->
+                        karr (val:arr)
+            return (exe, cid)
+        ) (arr0exe, expCid e0exe) exprs
+    (arrCid, arrSid) <- getArrayCidSid $ expCid e0exe
+    return $ RValue arrCid $ mkExe $ \kv -> do
+        exec exprsExe $ \revArr re mem -> do
+            let arr = mkArrayObj arrSid $ reverse revArr
+                (pt, mem') = allocObject arr mem
+            kv (ValRef pt) re mem'
 exprSem (Expr_Var (LowerIdent (pos, varName))) = do
     vars <- asks envVars
     case M.lookup varName vars of
@@ -2095,3 +2156,17 @@ toDouble :: VarVal -> Double
 toDouble (ValDouble d) = d
 toDouble (ValInt i) = fromInteger $ toInteger i
 toDouble err = error $ "toDouble called on " ++ (show err)
+
+mkStringObj :: String -> Object
+mkStringObj s = Array {
+        objSid=stringSid,
+        arrLength=length s,
+        arrArray=M.fromList $ zip [0..] $ map ValChar s
+    }
+
+mkArrayObj :: Sid -> [VarVal] -> Object
+mkArrayObj sid arr = Array {
+        objSid=sid,
+        arrLength=length arr,
+        arrArray=M.fromList $ zip [0..] $ arr
+    }

@@ -57,5 +57,5 @@ fn printLn(String string):
 fn getChar() -> Char:
     return ' '  # placeholder
 
-fn getLine(String string):
+fn getLine() -> String:
     pass  # placeholder
