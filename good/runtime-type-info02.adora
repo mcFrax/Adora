@@ -10,6 +10,8 @@ case true:
     Bool:
         print 2
 
+print
+
 
 class Either:
     pass
@@ -32,10 +34,12 @@ struct Right:
 
 let printEither = fn (Either e):
     case e:
-        Left l: print l.left
-        Right r: print r.right
-
-print
+        Left l:
+            printStr("Left ")
+            print l.left
+        Right r:
+            printStr("Right ")
+            print r.right
 
 printEither(Left(1))
 printEither(Left(2))
@@ -46,7 +50,7 @@ printEither(Right(false))
 # 1
 # 2
 #
-# 1
-# 2
-# true
-# false
+# Left 1
+# Left 2
+# Right true
+# Right false
