@@ -1598,39 +1598,50 @@ exprSem (Expr_Not expr) = do
             ke $ ValBool $ not bval
 
 exprSem expr@(Expr_RelOper {}) = do
-    sem' <- exprSem' expr
+    (_, sem') <- exprSem' expr
     return $ RValue (stdClss M.! "Bool") $ mkExe $ \ke -> do
         exec sem' $ \maybeVal -> do
             ke $ ValBool $ isJust maybeVal
     where
-        exprSem' :: Expr -> TCM (Exe (Maybe VarVal))
+        exprSem' :: Expr -> TCM (Cid, (Exe (Maybe VarVal)))
         exprSem' (Expr_RelOper exp1 oper exp2) = do
-            e1exe <- exprSem' exp1
+            (cid1, e1exe) <- exprSem' exp1
             e2exe <- exprSem exp2
-            return $ mkExe $ \kmv -> do
-                exec e1exe $ \maybeVal -> do
-                    case maybeVal of
-                        Just val1 -> do
-                            execRValue e2exe $ \val2 -> do
-                                if operFun (asInt val1) (asInt val2) then
-                                    kmv $ Just val2
-                                else
-                                    kmv Nothing
-                        Nothing -> kmv Nothing
-                where
-                    operFun = case oper of
-                        RelOper_Eq -> (==)
-                        RelOper_Neq -> (/=)
-                        RelOper_Lt -> (<)
-                        RelOper_Lte -> (<=)
-                        RelOper_Gt -> (>)
-                        RelOper_Gte -> (>=)
-                        op -> error ("operator " ++ (printTree op) ++
-                                     " not implemented yet")
+            if numbersOnly then do
+                _ <- whatNum (0, 0) cid1 True  -- TODO: real pos
+                _ <- whatNum (0, 0) (expCid e2exe) True  -- TODO: real pos
+                return ()
+            else do
+                let cids = S.fromList [cid1, expCid e2exe]
+                    numCids = S.fromList [stdClss M.! "Int", stdClss M.! "Double"]
+                when (((S.size cids) > 1) &&  (not (cids `S.isSubsetOf` numCids))) $ do
+                    throwError $ ErrSomewhere "Comparizon of values of different types"
+            return $ (expCid e2exe, mkExe $ \kmv -> do
+                    exec e1exe $ \maybeVal -> do
+                        case maybeVal of
+                            Just val1 -> do
+                                execRValue e2exe $ \val2 -> do
+                                    if operFun val1 val2 then
+                                        kmv $ Just val2
+                                    else
+                                        kmv Nothing
+                            Nothing -> kmv Nothing
+                )
+            where
+                (operFun, numbersOnly) = case oper of
+                    RelOper_Eq -> ((==), False)
+                    RelOper_Neq -> ((/=), False)
+                    RelOper_Lt -> ((<), True)
+                    RelOper_Lte -> ((<=), True)
+                    RelOper_Gt -> ((>), True)
+                    RelOper_Gte -> ((>=), True)
+                    op -> error ("operator " ++ (printTree op) ++
+                                " not implemented yet")
         exprSem' expr' = do
             exee <- exprSem expr'
-            return $ mkExe $ \kmv -> do
-                execRValue exee $ \v -> kmv $ Just v
+            return (expCid exee, mkExe $ \kmv -> do
+                    execRValue exee $ \v -> kmv $ Just v
+                )
 
 exprSem (Expr_Add exp1 (Tok_Plus (pos, _)) exp2) = do
     numBinopSem pos (+) (+) exp1 exp2

@@ -153,6 +153,25 @@ instance NFData VarVal where
     rnf (ValDouble d) = rnf d
     rnf (ValChar c) = rnf c
 
+instance Eq VarVal where
+    (ValInt n1) == (ValInt n2) = n1 == n2
+    (ValInt n) == (ValDouble d) = d == (fromInteger $ toInteger n)
+    (ValDouble d) == (ValInt n) = (fromInteger $ toInteger n) == d
+    (ValDouble d1) == (ValDouble d2) = d1 == d2
+    (ValBool b1) == (ValBool b2) = b1 == b2
+    (ValChar c1) == (ValChar c2) = c1 == c2
+    (ValRef pt1) == (ValRef pt2) = pt1 == pt2
+    ValNull == ValNull = True
+    _ == _ = False
+
+instance Ord VarVal where
+    (ValInt n1) <= (ValInt n2) = n1 <= n2
+    (ValInt n) <= (ValDouble d) = (fromInteger $ toInteger n) <= d
+    (ValDouble d) <= (ValInt n) = d <= (fromInteger $ toInteger n)
+    (ValDouble d1) <= (ValDouble d2) = d1 <= d2
+    (ValChar c1) <= (ValChar c2) = c1 <= c2
+    _ <= _ = undefined
+
 
 isTruthy :: VarVal -> Bool
 isTruthy ValNull = False

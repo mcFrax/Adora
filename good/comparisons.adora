@@ -1,0 +1,9 @@
+assert 1 == 1
+assert 'a' == 'a'
+assert nil == nil
+assert Nil() != Nil()
+assert "a" != "a"  # różne obiekty - niestety
+assert 1.0 == 1
+assert 1 < 2.0 < 3.0
+assert not 2.001 < 2 < 3.0
+assert not 2 < 3 < 3

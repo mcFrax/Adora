@@ -1,0 +1,71 @@
+# Niestety, zupełnie zapomniałem o dodaniu do Char jakichś sensownych funkcji
+# i operatorów, więc wygląda to jak wygląda.
+
+let digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+
+fn readDigit(Char c) -> Int:
+    var i = 0
+    while i < digits.length:
+        if digits[i] == c:
+            return i
+        i = i+1
+    assert false
+
+fn writeDigit(Int i) -> Char:
+    return digits[i % 10]
+
+fn readNumber(String s) -> Int:
+    assert s.length > 0
+    var i = 0
+    var result = 0
+    var negative = s[0] == '-'
+    if negative:
+        assert s.length > 1
+        i = 1
+    while i < s.length:
+        result = 10 * result + readDigit(s[i])
+        i = i + 1
+    if negative:
+        return -result
+    else:
+        return result
+
+fn writeNumber(Int n) -> String:
+    if n == 0:
+        return "0"
+    var negative = n < 0
+    if negative:
+        n = -n
+    var s = String(25, '0')
+    var i = s.length-1
+    while n > 0:
+        s[i] = writeDigit(n % 10)
+        n = n//10
+        i = i-1
+    if negative:
+        s[i] = '-'
+    else:
+        i = i + 1
+    let result = String(s.length-i, '0')
+    let i0 = i
+    while i < s.length:
+        result[i-i0] = s[i]
+        i = i+1
+    return result
+
+printLn(writeNumber(123))
+printLn(writeNumber(321))
+printLn(writeNumber(readNumber(getLine()) + 123000))
+printLn(writeNumber(readNumber(getLine()) + 123456))
+printLn(writeNumber(-readNumber(getLine())))
+
+# INPUT #
+# 321
+# -456
+# 456
+# EXPECTED OUTPUT #
+# 123
+# 321
+# 123321
+# 123000
+# -456

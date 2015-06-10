@@ -1,0 +1,6 @@
+# nierówności na razie tylko na liczbach, niestety
+
+'a' < 'a'
+
+# EXPECTED COMPILATION ERROR #
+# bad/comparisons01.adora:0:0: error: `Char' is not a number type

@@ -1,0 +1,6 @@
+# porównywać można tylko liczby albo wartości tego samego typu
+
+1 == true
+
+# EXPECTED COMPILATION ERROR #
+# ?:?:?: error: Comparizon of values of different types
