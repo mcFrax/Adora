@@ -1,0 +1,48 @@
+# MRO
+
+struct Base:
+    mth say():
+        printLn("...")
+
+struct Quacking:
+    mth say():
+        printLn("Quack!")
+
+struct Flapping:
+    mth flap():
+        printLn("Flap!")
+
+struct Wing(Flapping):
+    pass
+
+struct Flying(Base):
+    Wing leftWing
+    Wing leftWing:
+        get:
+            return self.[leftWing]
+    Wing rightWing
+    Wing rightWing:
+        get:
+            return self.[rightWing]
+
+    mth fly():
+        self.leftWing.flap()
+        self.rightWing.flap()
+
+fn constructFlying(((Wing _, Wing _) -> Flying) ctor) -> Flying:
+    return ctor(Wing(), Wing())
+
+struct Bird(Flying):
+    mth say():
+        printLn("<generic tweet>")
+
+struct Duck(Quacking, Bird):
+    pass
+
+let bird = constructFlying(fn (Wing w1, Wing w2) -> Flying:
+                               return Bird(w1, w2) as Flying
+                           )
+let duck = Duck()
+
+duck.fly()
+duck.say()
