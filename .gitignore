@@ -29,12 +29,8 @@ Testadora
 interpreter
 parselib
 
-franciszek_boehlke
-franciszek_boehlke.zip
-
 .adora-history
 StdLib.hs
-franciszek_boehlke.tar.gz
 .hpc
 *.tix
 coverage

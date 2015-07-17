@@ -11,7 +11,7 @@ TestBuild :=
 TestBuildMarker := ./testbuild
 OptBuildMarker := ./optbuild
 BuildMarker := $(if $(TestBuild),$(TestBuildMarker),$(OptBuildMarker))
-CommonGHCFlags := -cpp $(if $(TestBuild),-g -fhpc -prof -auto-all -caf-all,-O2) -DUSE_HASKELINE
+CommonGHCFlags := -cpp $(if $(TestBuild),-fhpc -prof -auto-all -caf-all,-O2) -DUSE_HASKELINE
 
 all: Testadora interpreter
 
@@ -51,35 +51,10 @@ $(BnfcFiles): $(Langname).cf
 	bnfc -haskell adora.cf >/dev/null || bnfc -haskell adora.cf 1>&2
 	touch $(BnfcFiles)  # tell `make` these files are up to date
 
-define ZipFiles
-README.pdf adora.cf stdlib.adora\
-run-test.py\
-Makefile $(Examples) $(SourceHs)
-endef
-
-franciszek_boehlke.tar.gz: $(patsubst %,franciszek_boehlke/%,$(ZipFiles))
-	tar -acf franciszek_boehlke.tar.gz franciszek_boehlke
-
-franciszek_boehlke/README.pdf: adora.pdf
-	@mkdir -p $$(dirname "$@")
-	cp "$<" "$@"
-
-franciszek_boehlke/Makefile: Makefile
-	@mkdir -p $$(dirname "$@")
-	sed 's/-D''USE_HASKELINE//g' "$<" > "$@"
-
-franciszek_boehlke/%: %
-	@mkdir -p $$(dirname "$@")
-	cp "$<" "$@"
-
 GoodTestCases := $(addprefix test-case-,$(GoodExamples))
 BadTestCases := $(addprefix test-case-,$(BadExamples))
 TestCases := $(GoodTestCases) $(BadTestCases)
-.PHONY: test test-students $(TestCases) test-coverage
-
-test-students: franciszek_boehlke.tar.gz students-test-script.sh
-	scp franciszek_boehlke.tar.gz fb320589@students.mimuw.edu.pl:~/jpp/adora
-	ssh fb320589@students.mimuw.edu.pl < students-test-script.sh
+.PHONY: test $(TestCases) test-coverage
 
 test: interpreter
 	@./run-test.py $(GoodExamples) $(BadExamples)
@@ -114,11 +89,9 @@ clean: tix-clean
 	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y
 	-rm -f adora.html adora.pdf Docadora.pdf
 	-rm -f parselib StdLib.hs
-	-rm -rf franciszek_boehlke
 	-rm -f $(TestBuildMarker) $(OptBuildMarker)
 
 distclean: clean
 	-rm -f Docadora.* Lexadora.* Paradora.* Layoutadora.* Skeladora.* Printadora.* Testadora.* Absadora.* ErrM.* SharedString.* adora.dtd XMLadora.*
 	-rm -f coverage/*
 	-rm -f interpreter Testadora
-	-rm -rf franciszek_boehlke.tar.gz
