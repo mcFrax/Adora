@@ -41,10 +41,10 @@ Paradora.hs: Paradora.y
 Docadora.pdf: %.pdf: %.tex
 	- pdflatex "$<"
 
-adora.pdf: %.pdf: %.html
-	wkhtmltopdf --title 'Adora README (Franciszek Boehlke)' "$<" "$@"
+readme.pdf: %.pdf: %.html
+	wkhtmltopdf --title 'Adora language' "$<" "$@"
 
-adora.html: adora.md github.css
+readme.html: readme.md github.css
 	pandoc -s -S "$<" -o "$@" --css=github.css --self-contained --highlight-style=kate
 
 $(BnfcFiles): $(Langname).cf
@@ -87,7 +87,7 @@ tix-clean:
 
 clean: tix-clean
 	-rm -f *.log *.aux *.hi *.o *.ps *.dvi *.x *.y
-	-rm -f adora.html adora.pdf Docadora.pdf
+	-rm -f readme.html readme.pdf Docadora.pdf
 	-rm -f parselib StdLib.hs
 	-rm -f $(TestBuildMarker) $(OptBuildMarker)
 
