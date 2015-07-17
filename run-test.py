@@ -56,8 +56,8 @@ def runTest(filename):
     expectedErr = ''.join((expectations[exCmpErr] or []) or (expectations[exRunErr] or []))
 
     cmd = ['./interpreter', filename]
-    if testbuild:
-        cmd += ['+RTS', '-xc']
+    #if testbuild:
+        #cmd += ['+RTS', '-xc']
     test = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (out, errout) = test.communicate(input=''.join(expectations[exIn] or []))
     test.wait()
